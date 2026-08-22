@@ -1,3 +1,23 @@
+# ── 内部工作产物:public repo,但思考过程不公开(kickoff 决策 #7)──
 docs/
 CLAUDE.md
 PROJECT_RIGOR.md
+
+# ── 依赖 / 构建产物 ──
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ── env:密钥与跨 repo URL 永不进 git(CONVENTIONS.md)──
+# v1 没有任何 API key;这里挡的是 CLIENT_ORIGIN / VITE_SERVER_URL 之类的本地覆盖。
+.env
+.env.*
+!.env.example
+
+# ── 日志 / 编辑器 / 系统 ──
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

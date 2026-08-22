@@ -1,0 +1,288 @@
+/**
+ * Socket 层 —— 事件接线 + **房间状态 mutation 的唯一 choke point**。
+ *
+ * LOBBY-PATTERN 的前置条件:「A game without a mutation choke point should build
+ * that first. It is worth more than the lobby feature itself.」
+ * 这里就是那个 choke point:`commit(room)`。**每一个改动房间的 handler 都必须调它,
+ * 且只调它** —— 广播和 lobby 调度是它的事,不是 handler 的事。
+ *
+ * SPEC §8:server 只发语义 enum / key,**永不发展示字符串**。
+ * 本文件里搜不到任何一个中文展示串 —— 拒绝一律是 `{ code: ErrorCode }`。
+ */
+
+import type { Server, Socket } from 'socket.io';
+import { C2S, S2C, type ErrorCode, type Result } from '@shared/events';
+import { normalizeDisplayName } from '@shared/names';
+import type { PlayerId, RoomSettings, RoomSummary } from '@shared/types';
+import { LobbyBroadcaster } from '../room/LobbyBroadcaster';
+import type { Room } from '../room/Room';
+import { RoomManager } from '../room/RoomManager';
+
+const LOBBY_CHANNEL = 'lobby';
+const roomChannel = (code: string) => `room:${code}`;
+
+interface SocketData {
+  playerId?: PlayerId;
+  nickname?: string;
+}
+
+export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: () => void } {
+  const manager = new RoomManager();
+
+  /** playerId → socket。per-viewer 投影要按人发,不能用频道广播一把梭。 */
+  const sockets = new Map<PlayerId, Socket>();
+
+  const lobby = new LobbyBroadcaster<RoomSummary>(
+    () => buildLobbyList(manager),
+    (rooms) => io.to(LOBBY_CHANNEL).emit(S2C.LOBBY_LIST, { rooms }),
+  );
+
+  /* ══════════════════════ THE CHOKE POINT ══════════════════════ */
+
+  /**
+   * 房间被改动之后**唯一**该调的东西。
+   * 覆盖 join / leave / kick / ready / settings / 座位 / phase / 断线。
+   */
+  function commit(room: Room): void {
+    broadcastRoomState(room);
+    lobby.schedule();
+  }
+
+  /** per-viewer 投影:每个人拿到的是**给 ta 看的**那一份。 */
+  function broadcastRoomState(room: Room): void {
+    for (const player of room.players) {
+      const s = sockets.get(player.id);
+      if (s) s.emit(S2C.ROOM_STATE, room.toClientState(player.id));
+    }
+  }
+
+  // 通用面 #2:idle sweep 是唯一从外面观察不到的退出路径,必须挂回调。
+  manager.onRoomRemoved((room) => {
+    io.to(roomChannel(room.code)).emit(S2C.ROOM_CLOSED, {});
+    lobby.schedule();
+  });
+  manager.startSweep((room) => commit(room));
+
+  /* ═══════════════════════ connection ═══════════════════════ */
+
+  io.on('connection', (socket: Socket) => {
+    const data = socket.data as SocketData;
+
+    const fail = (code: ErrorCode) => socket.emit(S2C.ERROR, { code });
+
+    /** 拿到调用者的 playerId + 所在房间,拿不到就发错误码。 */
+    function actor(): { playerId: PlayerId; room: Room } | null {
+      const playerId = data.playerId;
+      if (!playerId) {
+        fail('INVALID_PAYLOAD');
+        return null;
+      }
+      const room = manager.byPlayer(playerId);
+      if (!room) {
+        fail('NOT_IN_ROOM');
+        return null;
+      }
+      return { playerId, room };
+    }
+
+    /** 把 Result 收口成「成功就 commit,失败就发错误码」。 */
+    function settle(room: Room, r: Result<unknown>): void {
+      if (!r.ok) {
+        fail(r.error);
+        return;
+      }
+      commit(room);
+    }
+
+    /* ── 身份:localStorage 里的稳定 playerId 在这里认领 ── */
+    socket.on(C2S.HELLO, (payload: unknown) => {
+      const p = payload as { playerId?: unknown; nickname?: unknown } | null;
+      const playerId = typeof p?.playerId === 'string' ? p.playerId : null;
+      if (!playerId) return fail('INVALID_PAYLOAD');
+
+      data.playerId = playerId;
+      data.nickname = normalizeDisplayName(p?.nickname) ?? '';
+      sockets.set(playerId, socket);
+      socket.emit(S2C.HELLO_OK, { playerId });
+
+      // 断线重连:playerId 还在某个房间里 → 重新绑上去,不当新人处理(SPEC §7)。
+      const room = manager.byPlayer(playerId);
+      if (room) {
+        socket.leave(LOBBY_CHANNEL);
+        socket.join(roomChannel(room.code));
+        room.addPlayer(playerId, data.nickname || '', Date.now());
+        commit(room);
+      }
+    });
+
+    /* ── lobby 频道 ── */
+    socket.on(C2S.LOBBY_SUBSCRIBE, () => {
+      socket.join(LOBBY_CHANNEL);
+      // 规则 4:刚订阅的人绕过合并与去重,总是拿到一份快照。
+      socket.emit(S2C.LOBBY_LIST, { rooms: lobby.current() });
+    });
+
+    socket.on(C2S.LOBBY_UNSUBSCRIBE, () => socket.leave(LOBBY_CHANNEL));
+
+    /* ── 建房 / 加入 / 离开 ── */
+    socket.on(C2S.CREATE_ROOM, (payload: unknown) => {
+      const playerId = data.playerId;
+      if (!playerId) return fail('INVALID_PAYLOAD');
+      if (manager.byPlayer(playerId)) return fail('INVALID_PAYLOAD');
+
+      const p = payload as { isPrivate?: unknown } | null;
+      // create-then-modify 竞态:isPrivate **建房那一刻**就定死,不是先建公开再改。
+      const isPrivate = p?.isPrivate === true;
+
+      const created = manager.create({ id: playerId, nickname: data.nickname || '' }, isPrivate);
+      if (!created.ok) return fail(created.error);
+
+      socket.leave(LOBBY_CHANNEL);
+      socket.join(roomChannel(created.value.code));
+      commit(created.value);
+    });
+
+    socket.on(C2S.JOIN_ROOM, (payload: unknown) => {
+      const playerId = data.playerId;
+      if (!playerId) return fail('INVALID_PAYLOAD');
+
+      const p = payload as { code?: unknown } | null;
+      if (typeof p?.code !== 'string') return fail('INVALID_PAYLOAD');
+
+      const room = manager.byCode(p.code);
+      if (!room) return fail('ROOM_NOT_FOUND');
+
+      const added = room.addPlayer(playerId, data.nickname || '', Date.now());
+      if (!added.ok) return fail(added.error);
+
+      socket.leave(LOBBY_CHANNEL);
+      socket.join(roomChannel(room.code));
+      commit(room);
+    });
+
+    socket.on(C2S.LEAVE_ROOM, () => {
+      const a = actor();
+      if (!a) return;
+      a.room.removePlayer(a.playerId, Date.now());
+      socket.leave(roomChannel(a.room.code));
+      if (!manager.removeIfDeserted(a.room)) commit(a.room);
+      else lobby.schedule();
+    });
+
+    /* ── 房间层设置 ── */
+    socket.on(C2S.SET_READY, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const ready = (payload as { ready?: unknown } | null)?.ready === true;
+      settle(a.room, a.room.setReady(a.playerId, ready, Date.now()));
+    });
+
+    socket.on(C2S.SET_NICKNAME, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const name = normalizeDisplayName((payload as { nickname?: unknown } | null)?.nickname);
+      if (name === null) return fail('INVALID_PAYLOAD');
+      data.nickname = name;
+      settle(a.room, a.room.setNickname(a.playerId, name, Date.now()));
+    });
+
+    socket.on(C2S.UPDATE_SETTINGS, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const patch = (payload ?? {}) as Partial<RoomSettings>;
+      const r = a.room.updateSettings(a.playerId, patch, Date.now());
+      if (!r.ok) return fail(r.error);
+      manager.syncPrivacy(a.room); // 公私切换 → 发号 / 收号
+      commit(a.room);
+    });
+
+    socket.on(C2S.KICK_PLAYER, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const targetId = (payload as { playerId?: unknown } | null)?.playerId;
+      if (typeof targetId !== 'string') return fail('INVALID_PAYLOAD');
+
+      const r = a.room.kickPlayer(a.playerId, targetId, Date.now());
+      if (!r.ok) return fail(r.error);
+
+      const victim = sockets.get(targetId);
+      if (victim) {
+        victim.emit(S2C.KICKED, {});
+        victim.leave(roomChannel(a.room.code));
+      }
+      commit(a.room);
+    });
+
+    socket.on(C2S.TRANSFER_HOST, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const targetId = (payload as { playerId?: unknown } | null)?.playerId;
+      if (typeof targetId !== 'string') return fail('INVALID_PAYLOAD');
+      settle(a.room, a.room.transferHost(a.playerId, targetId, Date.now()));
+    });
+
+    /* ── oracle 座位(SPEC §2)── */
+    socket.on(C2S.CLAIM_ORACLE, () => {
+      const a = actor();
+      if (!a) return;
+      // 同步处理 = 先到先得。后到者收 SEAT_TAKEN,client 等广播才渲染。
+      settle(a.room, a.room.claimOracle(a.playerId, Date.now()));
+    });
+
+    socket.on(C2S.RELEASE_ORACLE, () => {
+      const a = actor();
+      if (!a) return;
+      settle(a.room, a.room.releaseOracle(a.playerId, Date.now()));
+    });
+
+    socket.on(C2S.ASSIGN_ORACLE, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const raw = (payload as { playerId?: unknown } | null)?.playerId;
+      const targetId = raw === null ? null : typeof raw === 'string' ? raw : undefined;
+      if (targetId === undefined) return fail('INVALID_PAYLOAD');
+      settle(a.room, a.room.assignOracle(a.playerId, targetId, Date.now()));
+    });
+
+    /* ── phase ── */
+    socket.on(C2S.START_GAME, () => {
+      const a = actor();
+      if (!a) return;
+      settle(a.room, a.room.startGame(a.playerId, Date.now()));
+    });
+
+    /* ── 断线:标记不移除,等宽限(SPEC §7)── */
+    socket.on('disconnect', () => {
+      const playerId = data.playerId;
+      if (!playerId) return;
+      // 只在这个 socket 仍是该 playerId 的当前 socket 时清 —— 否则会把刚重连的踢掉。
+      if (sockets.get(playerId) === socket) sockets.delete(playerId);
+
+      const room = manager.byPlayer(playerId);
+      if (!room) return;
+      room.markDisconnected(playerId, Date.now());
+      commit(room);
+    });
+  });
+
+  return {
+    manager,
+    dispose: () => {
+      manager.stopSweep();
+      lobby.dispose();
+    },
+  };
+}
+
+/**
+ * 投影是**调用方**的活(通用面 #5:manager 不知道 lobby 行长什么样)。
+ * 私密房不进列表 —— 只能靠码进(通用面 #7 双轨寻址)。
+ * **排序**:没排序的话去重不可靠 —— 迭代顺序变化会被读成内容变化。
+ */
+export function buildLobbyList(manager: RoomManager): RoomSummary[] {
+  return manager
+    .allRooms()
+    .filter((r) => !r.settings.isPrivate)
+    .map((r) => r.toSummary())
+    .sort((a, b) => (a.displayNumber ?? 0) - (b.displayNumber ?? 0));
+}
