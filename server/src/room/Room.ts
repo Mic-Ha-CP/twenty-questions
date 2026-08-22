@@ -12,6 +12,7 @@
 import { err, ok, OK, type ErrorCode, type Result } from '@shared/events';
 import { GAME_META } from '@shared/meta';
 import { rerollUniqueName } from '@shared/names';
+import { PUZZLE_LIMITS, type PublicPuzzle, type PuzzleDraft, type PuzzleListItem, type SituationPuzzle } from '@shared/puzzles';
 import {
   DEFAULT_PUZZLE_TYPE,
   isPuzzleTypeId,
@@ -28,12 +29,27 @@ import type {
 } from '@shared/types';
 import { canTransition } from '../game/phases';
 
+/**
+ * 题库端口。**Room 不认识 data/ 里的 json**,只认识这个接口 ——
+ * 于是 Room 可以脱离题库单测,题库也可以脱离 Room 单测。
+ */
+export interface BankPort {
+  /** 防剧透投影 + 已用过滤。 */
+  list(used: ReadonlySet<string>): PuzzleListItem[];
+  find(id: string): SituationPuzzle | undefined;
+}
+
+/** 无题库的默认实现。20Q 用的就是它,不需要任何分支。 */
+const EMPTY_BANK: BankPort = { list: () => [], find: () => undefined };
+
 export interface RoomInit {
   code: RoomCode;
   displayNumber: number | null;
   host: { id: PlayerId; nickname: string };
   isPrivate: boolean;
   now: number;
+  /** 不给就是空题库 —— 单测里几乎总是不给。 */
+  bank?: BankPort;
 }
 
 export class Room {
@@ -52,7 +68,23 @@ export class Room {
   oracleId: PlayerId | null = null;
   settings: RoomSettings;
 
+  /**
+   * oracle 录好的题。setup 里被填,reveal 之后清。
+   * **`truth` 只经由 toClientState 发给 oracle** —— 别在别处读它往外发。
+   */
+  puzzle: PuzzleDraft | null = null;
+
+  /**
+   * 防剧透三件套之三:per-room 已用题 Set。
+   * **内存,零持久化(ADR-12)** —— 房间没了就没了,跨 session 追踪是 auth 时代的事。
+   * 注意:换一题之后这题**仍然算用过**,不退回列表。
+   */
+  readonly usedPuzzleIds = new Set<string>();
+
+  private readonly bank: BankPort;
+
   constructor(init: RoomInit) {
+    this.bank = init.bank ?? EMPTY_BANK;
     this.code = init.code;
     this.displayNumber = init.isPrivate ? null : init.displayNumber;
     this.hostId = init.host.id;
@@ -372,6 +404,110 @@ export class Room {
     return OK;
   }
 
+  /* ─────────────────── setup:录题(SPEC §6)─────────────────── */
+
+  /** 录题的三个入口共用的守卫:必须是 oracle、必须在 setup、题不能已经录好。 */
+  private canRecord(requesterId: PlayerId): ErrorCode | null {
+    if (!this.isOracle(requesterId)) return 'NOT_ORACLE';
+    if (this.phase !== 'setup') return 'NOT_SETUP_PHASE';
+    if (this.puzzle !== null) return 'PUZZLE_ALREADY_SET';
+    return null;
+  }
+
+  /**
+   * 从题库选题。题目经由注入的 BankPort 取,Room 不认识 data/。
+   *
+   * 确认选定的**那一刻**:汤面对全房公开,汤底只对 oracle 展开,题记入已用 Set。
+   */
+  selectBankPuzzle(requesterId: PlayerId, puzzleId: string, now: number): Result<void> {
+    const guard = this.canRecord(requesterId);
+    if (guard) return err(guard);
+    if (!this.hasBank()) return err('BANK_NOT_AVAILABLE');
+    if (this.usedPuzzleIds.has(puzzleId)) return err('PUZZLE_ALREADY_USED');
+
+    const found = this.bank.find(puzzleId);
+    if (!found) return err('PUZZLE_NOT_FOUND');
+
+    this.puzzle = {
+      source: 'bank',
+      bankId: found.id,
+      title: found.title,
+      surface: found.surface,
+      truth: found.truth,
+    };
+    this.usedPuzzleIds.add(found.id);
+    this.touch(now);
+    return OK;
+  }
+
+  /**
+   * 自写题(海龟汤:汤面 + 汤底两栏)/ 20Q 的答案词(surface 传 null)。
+   * 两者是**同一条路径** —— 差异只是 surface 有没有,不需要判类型。
+   */
+  setCustomPuzzle(
+    requesterId: PlayerId,
+    input: { surface?: string | null; truth?: unknown; title?: string | null },
+    now: number,
+  ): Result<void> {
+    const guard = this.canRecord(requesterId);
+    if (guard) return err(guard);
+
+    const truth = trimmed(input.truth);
+    if (!truth) return err('INVALID_PUZZLE');
+
+    const wantsSurface = this.hasBank();
+    const surface = trimmed(input.surface);
+
+    // 有题库的类型(海龟汤)必须给汤面;没题库的(20Q)不接受汤面。
+    if (wantsSurface && !surface) return err('INVALID_PUZZLE');
+
+    const maxTruth = wantsSurface ? PUZZLE_LIMITS.truthMax : PUZZLE_LIMITS.answerWordMax;
+    if (truth.length > maxTruth) return err('INVALID_PUZZLE');
+    if (surface && surface.length > PUZZLE_LIMITS.surfaceMax) return err('INVALID_PUZZLE');
+
+    const title = trimmed(input.title);
+    if (title && title.length > PUZZLE_LIMITS.titleMax) return err('INVALID_PUZZLE');
+
+    this.puzzle = {
+      source: 'own',
+      bankId: null,
+      title: title ?? null,
+      surface: wantsSurface ? surface : null,
+      truth,
+    };
+    this.touch(now);
+    return OK;
+  }
+
+  /** 换一题:清掉已录的。**已用的仍然算用过**,不退回列表。 */
+  clearPuzzle(requesterId: PlayerId, now: number): Result<void> {
+    if (!this.isOracle(requesterId)) return err('NOT_ORACLE');
+    if (this.phase !== 'setup') return err('NOT_SETUP_PHASE');
+    this.puzzle = null;
+    this.touch(now);
+    return OK;
+  }
+
+  /** 开汤(海龟汤)/ 锁定开局(20Q):setup → playing。题没录好不许走。 */
+  beginPlaying(requesterId: PlayerId, now: number): Result<void> {
+    if (!this.isOracle(requesterId)) return err('NOT_ORACLE');
+    if (!canTransition(this.phase, 'playing')) return err('NOT_SETUP_PHASE');
+    if (this.puzzle === null) return err('NO_PUZZLE_SET');
+    this.phase = 'playing';
+    this.touch(now);
+    return OK;
+  }
+
+  /** 这个房间当前的 puzzle type 有没有题库 —— **读 config 表,不判类型**。 */
+  hasBank(): boolean {
+    return puzzleConfig(this.settings.puzzleType).hasBank;
+  }
+
+  /** 本房还能选的题(已用的不出现)。无题库的类型恒为空。 */
+  availablePuzzles(): PuzzleListItem[] {
+    return this.hasBank() ? this.bank.list(this.usedPuzzleIds) : [];
+  }
+
   /* ───────────────────── projections ──────────────────── */
 
   /**
@@ -394,10 +530,19 @@ export class Room {
 
   /**
    * 机制通用,**遮蔽策略是游戏规则**。
-   * scaffold 阶段还没有可遮的东西(题目/汤底/答案词下个 session 才进 Room)——
-   * 加它们的时候,**遮蔽必须发生在这里**,不是在 client 侧隐藏。
+   *
+   * ⚠️ **这个方法是本游戏唯一的信息边界。** 汤底 / 答案词 / 选题列表都在这里被
+   * 按收件人裁掉。裁错了不会抛异常、不会红屏 —— 只是所有人都看见了答案,
+   * 而且没人会立刻发现。PROJECT_RIGOR §4 必测 1。
+   *
+   * 规则:
+   *   · `puzzle`      公开面(题名 + 汤面)。全房可见。20Q 的 surface 是 null。
+   *   · `oracleTruth` 汤底 / 答案词。**只有 oracle 那一份有值。**
+   *   · `bank`        选题列表。**只有 oracle 那一份有值** —— 让 guesser 看见
+   *                   候选题名本身就是剧透。
    */
   toClientState(viewerId: PlayerId): RoomState {
+    const isOracle = this.isOracle(viewerId);
     return {
       code: this.code,
       displayNumber: this.displayNumber,
@@ -407,10 +552,29 @@ export class Room {
       oracleId: this.oracleId,
       settings: { ...this.settings },
       viewerId,
+      puzzle: this.puzzle ? publicFace(this.puzzle) : null,
+      oracleTruth: isOracle ? (this.puzzle?.truth ?? null) : null,
+      bank: isOracle && this.hasBank() ? this.availablePuzzles() : null,
+      bankExhausted: this.hasBank() && this.availablePuzzles().length === 0,
     };
   }
 }
 
+/**
+ * 题目的公开面。**truth 结构性缺席** —— 不是被删掉的,是从来没被放进来过。
+ * 和 toSummary 同一个道理:将来给 PuzzleDraft 加字段,不会自动泄漏。
+ */
+function publicFace(p: PuzzleDraft): PublicPuzzle {
+  return { title: p.title, surface: p.surface, ready: true };
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
+}
+
+/** 收敛成 trim 过的非空字符串,拿不到就是 null。 */
+function trimmed(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length > 0 ? t : null;
 }

@@ -14,8 +14,9 @@ import type { Server, Socket } from 'socket.io';
 import { C2S, S2C, type ErrorCode, type Result } from '@shared/events';
 import { normalizeDisplayName } from '@shared/names';
 import type { PlayerId, RoomSettings, RoomSummary } from '@shared/types';
+import { findPuzzle, listAvailable, suggestAnswerWord } from '../game/puzzleBank';
 import { LobbyBroadcaster } from '../room/LobbyBroadcaster';
-import type { Room } from '../room/Room';
+import type { BankPort, Room } from '../room/Room';
 import { RoomManager } from '../room/RoomManager';
 
 const LOBBY_CHANNEL = 'lobby';
@@ -26,8 +27,11 @@ interface SocketData {
   nickname?: string;
 }
 
+/** 题库端口的真实实现 —— 唯一把 data/ 接进 Room 的地方。 */
+const BANK: BankPort = { list: listAvailable, find: findPuzzle };
+
 export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: () => void } {
-  const manager = new RoomManager();
+  const manager = new RoomManager(() => Date.now(), BANK);
 
   /** playerId → socket。per-viewer 投影要按人发,不能用频道广播一把梭。 */
   const sockets = new Map<PlayerId, Socket>();
@@ -249,6 +253,60 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
       const a = actor();
       if (!a) return;
       settle(a.room, a.room.startGame(a.playerId, Date.now()));
+    });
+
+    /* ── setup:录题(SPEC §6)。全部 oracle-only,守卫在 Room 里 ── */
+    socket.on(C2S.SELECT_BANK_PUZZLE, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const id = (payload as { puzzleId?: unknown } | null)?.puzzleId;
+      if (typeof id !== 'string') return fail('INVALID_PAYLOAD');
+      settle(a.room, a.room.selectBankPuzzle(a.playerId, id, Date.now()));
+    });
+
+    socket.on(C2S.SET_CUSTOM_PUZZLE, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const p = (payload ?? {}) as { surface?: unknown; truth?: unknown; title?: unknown };
+      settle(
+        a.room,
+        a.room.setCustomPuzzle(
+          a.playerId,
+          {
+            surface: typeof p.surface === 'string' ? p.surface : null,
+            truth: p.truth,
+            title: typeof p.title === 'string' ? p.title : null,
+          },
+          Date.now(),
+        ),
+      );
+    });
+
+    socket.on(C2S.CLEAR_PUZZLE, () => {
+      const a = actor();
+      if (!a) return;
+      settle(a.room, a.room.clearPuzzle(a.playerId, Date.now()));
+    });
+
+    socket.on(C2S.BEGIN_PLAYING, () => {
+      const a = actor();
+      if (!a) return;
+      settle(a.room, a.room.beginPlaying(a.playerId, Date.now()));
+    });
+
+    /**
+     * 20Q 的随机建议词。**点对点回给 oracle,不广播** —— 广播就等于把候选词
+     * 发给了所有 guesser。这不是房间状态,所以不走 commit()。
+     */
+    socket.on(C2S.SUGGEST_ANSWER_WORD, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      if (!a.room.isOracle(a.playerId)) return fail('NOT_ORACLE');
+      if (a.room.phase !== 'setup') return fail('NOT_SETUP_PHASE');
+      const exclude = (payload as { exclude?: unknown } | null)?.exclude;
+      socket.emit(S2C.ANSWER_WORD_SUGGESTION, {
+        word: suggestAnswerWord(typeof exclude === 'string' ? exclude : undefined),
+      });
     });
 
     /* ── 断线:标记不移除,等宽限(SPEC §7)── */

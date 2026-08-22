@@ -35,23 +35,33 @@ export default {
         'accent-ink': '#14140e',
 
         /**
-         * ── 判定色(SPEC §8 的六个语义)──
+         * ── 判定色(SPEC §8 的六个语义)· DECISIONS #6 ──
          * key 与 shared/puzzleTypes.ts 的 Answer enum 一一对应,
-         * 这样按钮组可以照 config 表的 `answers` 数组渲染,不需要 if(type)。
+         * 按钮组照 config 表的 `answers` 数组渲染,不需要 if(type)。
+         *
+         * **琥珀已退出普通判定色。** 「是也不是」不再借用 accent ——
+         * 见下面的 both-from / both-to 双色。
          */
         judge: {
           yes: 'oklch(0.80 0.15 150)', // ✓ 是
           no: 'oklch(0.68 0.20 25)', // ✗ 不是
           irrelevant: '#6f6a5c', // — 无关(压灰,修正 2)
           unclear: 'oklch(0.72 0.06 245)', // ? 不确定(20Q)
+
           /**
-           * ⚠️ ◐ 是也不是。设计稿把它画成 accent(= 琥珀),
-           * 但 SPEC §9 修正 1 规定琥珀**只留给三焦点**,是也不是不在其中。
-           * 两者冲突,**未裁定** —— 见 NOTES 偏差 log。
-           * 这里先按稿的值落着;建判定按钮组之前必须解掉。
+           * ◐ 是也不是 = **绿/红双色**,不是第三种颜色。
+           * 语义就是「一半是、一半不是」,双色把这件事直接画出来。
+           * 渲染配方见 index.css 的 `.judge-both-mark`(半填充)。
            */
-          both: 'oklch(0.80 0.13 74)',
-          /** ★ 就是它!命中态 —— 这个**是**三焦点之一,用琥珀名正言顺。 */
+          'both-from': 'oklch(0.80 0.15 150)',
+          'both-to': 'oklch(0.68 0.20 25)',
+
+          /**
+           * ★ 就是它! —— **保持琥珀**。
+           * 它不是普通判定,它就是 SPEC §9 三焦点里的「命中态」本身。
+           * ⚠️ 若 PM 的「amber 完全退出判定色」也包括这一条,改这一行即可。
+           * 见 DECISIONS #6 的 open sub-question。
+           */
           correct: 'oklch(0.80 0.13 74)',
         },
       },

@@ -7,6 +7,7 @@
  * 本文件把两段用注释明确隔开;加字段前先想清楚它属于哪半边。
  */
 
+import type { PuzzleListItem, PublicPuzzle } from './puzzles';
 import type { PuzzleTypeId } from './puzzleTypes';
 
 /* ────────────────────────────  ROOM LAYER  ──────────────────────────── */
@@ -102,4 +103,25 @@ export interface RoomState {
   settings: RoomSettings;
   /** 收件人自己的 id —— client 用它判断「我是不是 oracle / host」,不靠猜。 */
   viewerId: PlayerId;
+
+  /* ─── setup 之后才有值。**遮蔽发生在 server 的投影里,不在 client 侧隐藏。** ─── */
+
+  /**
+   * 题目的**公开面**:汤面 + 题名。全房可见。
+   * 20Q 的 surface 是 null —— guesser 只知道「题录好了」,看不见答案词。
+   */
+  puzzle: PublicPuzzle | null;
+  /**
+   * 汤底 / 答案词。**只有 oracle 的那一份 RoomState 里有值**,其余人恒为 null。
+   * 这一条静默失效 = 游戏直接不能玩且没人立刻发现 —— PROJECT_RIGOR §4 必测 1。
+   */
+  oracleTruth: string | null;
+  /**
+   * 选题列表(防剧透投影:只有 title + tags/difficulty)。
+   * **只发给 oracle**:让 guesser 看见候选题名本身就是剧透。
+   * 无题库的 puzzle type 恒为 null。
+   */
+  bank: PuzzleListItem[] | null;
+  /** 这一房把题库用光了没 —— 用光时 client 引导去自写。 */
+  bankExhausted: boolean;
 }

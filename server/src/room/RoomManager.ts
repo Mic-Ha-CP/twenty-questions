@@ -8,7 +8,7 @@
 import { err, ok, type Result } from '@shared/events';
 import { GAME_META } from '@shared/meta';
 import type { PlayerId, RoomCode } from '@shared/types';
-import { Room } from './Room';
+import { Room, type BankPort } from './Room';
 
 type RoomRemovedHandler = (room: Room, reason: RemovalReason) => void;
 export type RemovalReason = 'empty' | 'idle' | 'no_humans';
@@ -20,7 +20,11 @@ export class RoomManager {
   private removedHandlers: RoomRemovedHandler[] = [];
   private sweepTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly now: () => number = () => Date.now()) {}
+  constructor(
+    private readonly now: () => number = () => Date.now(),
+    /** 题库端口 —— 原样交给每个新房间。不给就是空题库(单测常态)。 */
+    private readonly bank?: BankPort,
+  ) {}
 
   /* ───────────────────────── create / lookup ───────────────────────── */
 
@@ -44,6 +48,7 @@ export class RoomManager {
       host,
       isPrivate,
       now: this.now(),
+      ...(this.bank ? { bank: this.bank } : {}),
     });
     this.rooms.set(code, room);
     return ok(room);

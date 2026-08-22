@@ -29,6 +29,16 @@ export const C2S = {
 
   /* — phase — */
   START_GAME: 'c:start_game',
+
+  /* — setup:录题(SPEC §6)。全部 oracle-only —— */
+  SELECT_BANK_PUZZLE: 'c:select_bank_puzzle',
+  SET_CUSTOM_PUZZLE: 'c:set_custom_puzzle',
+  /** 换一题:清掉已录的题,回到选题界面。已用的仍算已用。 */
+  CLEAR_PUZZLE: 'c:clear_puzzle',
+  /** 开汤(海龟汤)/ 锁定后开局(20Q)→ playing。 */
+  BEGIN_PLAYING: 'c:begin_playing',
+  /** 20Q 的「随机建议」。**不是题库**,是 server 内一个词表。 */
+  SUGGEST_ANSWER_WORD: 'c:suggest_answer_word',
 } as const;
 
 export const S2C = {
@@ -37,6 +47,8 @@ export const S2C = {
   ROOM_STATE: 's:room_state',
   ROOM_CLOSED: 's:room_closed',
   KICKED: 's:kicked',
+  /** 建议词是点对点回给 oracle 的,不广播 —— 别人不该看见它。 */
+  ANSWER_WORD_SUGGESTION: 's:answer_word_suggestion',
   /** 所有拒绝走这一条。payload = { code: ErrorCode }。**不带中文。** */
   ERROR: 's:error',
 } as const;
@@ -66,6 +78,17 @@ export const ERROR_CODES = [
   'NOT_ENOUGH_PLAYERS',
   'INVALID_SETTINGS',
   'INVALID_PAYLOAD',
+  /* — setup / 题库 — */
+  'NOT_SETUP_PHASE',
+  'PUZZLE_NOT_FOUND',
+  /** 同房不重复:这题这一局已经用过了。 */
+  'PUZZLE_ALREADY_USED',
+  /** 题已录好,要换先 c:clear_puzzle —— 防止误覆盖。 */
+  'PUZZLE_ALREADY_SET',
+  'NO_PUZZLE_SET',
+  'INVALID_PUZZLE',
+  /** 这个 puzzle type 没有题库(config 表 hasBank=false)。 */
+  'BANK_NOT_AVAILABLE',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

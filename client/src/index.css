@@ -13,3 +13,50 @@
     @apply bg-bg text-ink font-sans antialiased;
   }
 }
+
+@layer components {
+  /**
+   * ◐「是也不是」的半填充记号(DECISIONS #6)。
+   *
+   * 左半绿、右半红 —— 语义是「一半是、一半不是」,颜色把它直接画出来,
+   * 不需要第三种色相,也不用借琥珀(琥珀留给三焦点)。
+   *
+   * `color` 先给一个实色兜底:万一 background-clip:text 不生效,
+   * 字符仍然是可见的绿色,而不是透明(= 消失)。
+   */
+  .judge-both-mark {
+    color: theme('colors.judge.both-from');
+    background-image: linear-gradient(
+      90deg,
+      theme('colors.judge.both-from') 0 50%,
+      theme('colors.judge.both-to') 50% 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /** 双色描边版本 —— 需要圆角时用它(border-image 会吃掉 border-radius)。 */
+  .judge-both-ring {
+    position: relative;
+    border-color: transparent;
+  }
+  .judge-both-ring::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      90deg,
+      theme('colors.judge.both-from'),
+      theme('colors.judge.both-to')
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
