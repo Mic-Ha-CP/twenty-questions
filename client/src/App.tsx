@@ -11,17 +11,19 @@
  */
 
 import { useEffect } from 'react';
-import { Kicker, Panel } from '@/components/ui';
+import { Button, Kicker, Narrative, Panel } from '@/components/ui';
 import Landing from '@/screens/Landing';
 import Lobby from '@/screens/Lobby';
+import Playing from '@/screens/Playing';
 import Setup from '@/screens/Setup';
+import { useIsHost } from '@/store/roomStore';
 import { useLangStore, useT } from '@/store/langStore';
 import { useRoomStore, wireRoomSocket } from '@/store/roomStore';
 
 export default function App() {
   const t = useT();
   const { lang, setLang } = useLangStore();
-  const { conn, room, error, clearError } = useRoomStore();
+  const { conn, ready, room, error, clearError } = useRoomStore();
 
   useEffect(() => wireRoomSocket(), []);
 
@@ -34,9 +36,13 @@ export default function App() {
 
   return (
     <div className="relative min-h-full bg-vault">
-      {conn !== 'online' && (
+      {/*
+        条件是 `!ready` 而不是 `conn !== 'online'`:连上到收到 s:hello_ok 之间
+        还有一个窗口,那段时间点按钮只会被排队。宁可多显示一瞬,不要假装能用。
+      */}
+      {!ready && (
         <div className="sticky top-0 z-20 bg-judge-no/15 py-1.5 text-center text-xs text-ink">
-          {t('ui', `conn.${conn}`)}
+          {t('ui', conn === 'online' ? 'conn.identifying' : `conn.${conn}`)}
         </div>
       )}
 
@@ -69,27 +75,63 @@ function PhaseScreen() {
     case 'setup':
       return <Setup />;
     case 'playing':
+      return <Playing />;
     case 'reveal':
-      return <NotBuiltYet />;
+      return <RevealStub />;
   }
 }
 
 /**
- * playing / reveal 的占位。
- * 判定循环(SPEC §5)与 reveal 交接(SPEC §3)是下一刀的活 ——
- * 故意留个明显的空壳,而不是画一个假的界面。
+ * ⚠️ **reveal 的最小壳,不是 reveal 屏。**
+ *
+ * 完整的 reveal(结果呈现 + **下一局出题人交接**:默认猜中者接棒 / 未猜中则 oracle
+ * 连任 / host 可改,SPEC §3)是下一刀的活。这里只做两件事:
+ *   1. 把真相摆出来 —— 否则这一局没有终点;
+ *   2. 给 host 两个出口 —— 否则房间会永远卡在 reveal。
+ * 两个出口都会触发 `resetForNextRound`,第二局不带脏状态。
  */
-function NotBuiltYet() {
+function RevealStub() {
   const t = useT();
   const room = useRoomStore((s) => s.room)!;
+  const isHost = useIsHost();
+  const { startNextRound, backToLobby } = useRoomStore();
+  const outcome = room.outcome;
+  const winner = room.players.find((p) => p.id === outcome?.winnerId);
+
   return (
     <div className="mx-auto flex min-h-full max-w-xl flex-col justify-center gap-4 px-6 py-16">
-      <Panel className="p-6 text-center">
-        <Kicker>{t('phase', room.phase)}</Kicker>
-        <p className="mt-3 text-sm text-muted">
-          判定循环还没开工 —— 见 docs/ROADMAP.md Phase 1。
-        </p>
+      <Panel className="p-6">
+        <Kicker>{outcome ? t('ui', `reveal.${outcome.result}`) : t('phase', 'reveal')}</Kicker>
+        {winner && (
+          <p className="mt-2 text-sm text-accent">
+            {t('ui', 'reveal.winner')}:{winner.nickname}
+          </p>
+        )}
+        {outcome && (
+          <>
+            <div className="mt-4 text-xs text-muted">{t('ui', 'reveal.truth')}</div>
+            <Narrative className="mt-1">{outcome.truth}</Narrative>
+            <p className="mt-4 text-xs text-muted">
+              {t('ui', 'reveal.questionsUsed')} {outcome.questionsUsed} ·{' '}
+              {t('ui', 'reveal.duration')} {Math.round(outcome.durationMs / 1000)}s
+            </p>
+          </>
+        )}
       </Panel>
+
+      {isHost && (
+        <div className="flex gap-3">
+          <Button variant="solid" className="flex-1" onClick={startNextRound}>
+            {t('ui', 'reveal.nextRound')}
+          </Button>
+          <Button className="flex-1" onClick={backToLobby}>
+            {t('ui', 'reveal.backToLobby')}
+          </Button>
+        </div>
+      )}
+      <p className="text-center text-[11px] text-muted">
+        reveal 屏(含出题人交接)是下一刀 —— 见 docs/ROADMAP.md
+      </p>
     </div>
   );
 }

@@ -10,23 +10,36 @@
 
 import { create } from 'zustand';
 import { C2S, S2C, type ErrorCode } from '@shared/events';
+import type { Answer } from '@shared/puzzleTypes';
 import type { RoomSettings, RoomState, RoomSummary } from '@shared/types';
-import { getSocket } from '@/lib/socket';
+import { getSocket, onGateOverflow, onGateState, sendGated } from '@/lib/socket';
 import { rememberNickname } from '@/lib/nickname';
 
 export type Conn = 'connecting' | 'online' | 'offline';
 
 interface RoomStore {
   conn: Conn;
+  /**
+   * **认领完成**才算可操作(不只是 socket 连上)。
+   * 连上到收到 `s:hello_ok` 之间有一个短窗口 —— 那个窗口里点按钮会被 gate 排队,
+   * UI 该显示成不可用而不是假装能用(NOTES 待决 #7)。
+   */
+  ready: boolean;
   room: RoomState | null;
   lobby: RoomSummary[];
   /** 最近一次被拒的语义码。展示完就该清掉。 */
   error: ErrorCode | null;
   /** 20Q 的随机建议词 —— 点对点回来的,不是房间状态。 */
   suggestion: string | null;
+  /**
+   * 最近一次判定更正。**独立于 room_state** —— 推理链被改写必须当场看得见,
+   * 不能只靠 Q&A 流里那个小标记(SPEC §5)。
+   */
+  correction: { questionId: string; from: Answer | null; to: Answer | null } | null;
 
   clearError: () => void;
   clearSuggestion: () => void;
+  clearCorrection: () => void;
 
   /* — actions:只 emit,不改本地状态 — */
   subscribeLobby: () => void;
@@ -49,19 +62,37 @@ interface RoomStore {
   clearPuzzle: () => void;
   beginPlaying: () => void;
   suggestAnswerWord: (exclude?: string) => void;
+
+  /* — playing:判定循环 — */
+  askQuestion: (text: string) => void;
+  judge: (answer: Answer) => void;
+  correctLast: (answer: Answer) => void;
+  submitSolution: (text: string) => void;
+  resolveSubmission: (submissionId: string, accept: boolean) => void;
+  revealTruth: () => void;
+  startNextRound: () => void;
+  backToLobby: () => void;
 }
 
-const emit = (event: string, payload?: unknown) => getSocket().emit(event, payload ?? {});
+/**
+ * 业务事件的出口。**走 gate,不直接 socket.emit** ——
+ * 直接 emit 会让断线期间的点击被 socket.io 缓冲,重连时抢在 `c:hello` 前面到达
+ * server,被回一个没人看得见的 `INVALID_PAYLOAD`(NOTES 待决 #7)。
+ */
+const emit = (event: string, payload?: unknown) => sendGated(event, payload ?? {});
 
 export const useRoomStore = create<RoomStore>((set) => ({
   conn: 'connecting',
+  ready: false,
   room: null,
   lobby: [],
   error: null,
   suggestion: null,
+  correction: null,
 
   clearError: () => set({ error: null }),
   clearSuggestion: () => set({ suggestion: null }),
+  clearCorrection: () => set({ correction: null }),
 
   subscribeLobby: () => emit(C2S.LOBBY_SUBSCRIBE),
   createRoom: (isPrivate) => emit(C2S.CREATE_ROOM, { isPrivate }),
@@ -86,6 +117,16 @@ export const useRoomStore = create<RoomStore>((set) => ({
   clearPuzzle: () => emit(C2S.CLEAR_PUZZLE),
   beginPlaying: () => emit(C2S.BEGIN_PLAYING),
   suggestAnswerWord: (exclude) => emit(C2S.SUGGEST_ANSWER_WORD, { exclude }),
+
+  askQuestion: (text) => emit(C2S.ASK_QUESTION, { text }),
+  judge: (answer) => emit(C2S.JUDGE, { answer }),
+  correctLast: (answer) => emit(C2S.CORRECT_LAST, { answer }),
+  submitSolution: (text) => emit(C2S.SUBMIT_SOLUTION, { text }),
+  resolveSubmission: (submissionId, accept) =>
+    emit(C2S.RESOLVE_SUBMISSION, { submissionId, accept }),
+  revealTruth: () => emit(C2S.REVEAL_TRUTH),
+  startNextRound: () => emit(C2S.START_NEXT_ROUND),
+  backToLobby: () => emit(C2S.BACK_TO_LOBBY),
 }));
 
 /** 接线一次。App 挂载时调。 */
@@ -94,7 +135,12 @@ export function wireRoomSocket(): () => void {
   const set = useRoomStore.setState;
 
   const onConnect = () => set({ conn: 'online' });
-  const onDisconnect = () => set({ conn: 'offline' });
+  const onDisconnect = () => set({ conn: 'offline', ready: false });
+
+  // gate 状态 → UI 可用状态。'ready' 之前按钮该是禁用的。
+  const offState = onGateState((st) => set({ ready: st === 'ready' }));
+  // 不静默丢:队列溢出要让用户看见。
+  const offOverflow = onGateOverflow(() => set({ error: 'INTERNAL' }));
 
   const onRoomState = (state: RoomState) => {
     set({ room: state });
@@ -108,6 +154,11 @@ export function wireRoomSocket(): () => void {
   const onClosed = () => set({ room: null });
   const onKicked = () => set({ room: null });
   const onSuggestion = (payload: { word: string }) => set({ suggestion: payload.word });
+  const onCorrected = (payload: {
+    questionId: string;
+    from: Answer | null;
+    to: Answer | null;
+  }) => set({ correction: payload });
 
   s.on('connect', onConnect);
   s.on('disconnect', onDisconnect);
@@ -117,9 +168,12 @@ export function wireRoomSocket(): () => void {
   s.on(S2C.ROOM_CLOSED, onClosed);
   s.on(S2C.KICKED, onKicked);
   s.on(S2C.ANSWER_WORD_SUGGESTION, onSuggestion);
+  s.on(S2C.JUDGEMENT_CORRECTED, onCorrected);
   if (s.connected) set({ conn: 'online' });
 
   return () => {
+    offState();
+    offOverflow();
     s.off('connect', onConnect);
     s.off('disconnect', onDisconnect);
     s.off(S2C.ROOM_STATE, onRoomState);
@@ -128,6 +182,7 @@ export function wireRoomSocket(): () => void {
     s.off(S2C.ROOM_CLOSED, onClosed);
     s.off(S2C.KICKED, onKicked);
     s.off(S2C.ANSWER_WORD_SUGGESTION, onSuggestion);
+    s.off(S2C.JUDGEMENT_CORRECTED, onCorrected);
   };
 }
 
