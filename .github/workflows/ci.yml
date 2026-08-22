@@ -1,0 +1,67 @@
+# Polyrepo:每个 repo 自己接一份 CI,不共享 config(CONVENTIONS.md)。
+# 绿 = 类型过 + 测试过 + 构建过。三样缺一,这个 workflow 就没有意义。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支的新 push 取消旧跑,省额度。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: server (typecheck + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: install
+        working-directory: server
+        run: npm ci
+
+      - name: typecheck
+        working-directory: server
+        run: npm run typecheck
+
+      # 房间层 / oracle 座位 / start gate / config 表纪律 / i18n 纪律。
+      # 见 PROJECT_RIGOR.md §4「必须自动化」。
+      - name: test
+        working-directory: server
+        run: npm test
+
+  client:
+    name: client (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: install
+        working-directory: client
+        run: npm ci
+
+      - name: typecheck
+        working-directory: client
+        run: npm run typecheck
+
+      # client 目前没有测试:UI 属于 PROJECT_RIGOR §4「手测就够」那一栏。
+      # build 通过就是这一侧的门槛。
+      - name: build
+        working-directory: client
+        run: npx vite build
