@@ -143,4 +143,9 @@ export interface RoomState {
    * 在此之前真相只经由 `oracleTruth` 给 oracle。
    */
   outcome: RoundOutcome | null;
+  /**
+   * 下一局的出题人(SPEC §3 交接)。收束时按策略定默认值,host 可在 reveal 改。
+   * **全房可见** —— 交接结果不该只有 host 知道。非 reveal 期间为 null。
+   */
+  nextOracleId: PlayerId | null;
 }

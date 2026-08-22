@@ -50,6 +50,8 @@ export const C2S = {
   SUBMIT_SOLUTION: 'c:submit_solution',
   /** oracle 处理还原:accept → 命中收束 / reject → 无消耗。 */
   RESOLVE_SUBMISSION: 'c:resolve_submission',
+  /** reveal:改「下一局出题人」。host-only,reveal-only(不是中段接管)。 */
+  SET_NEXT_ORACLE: 'c:set_next_oracle',
   /** oracle「公开汤底 · 结束本局」。client 端必须先弹确认框(SPEC §5 防误触)。 */
   REVEAL_TRUTH: 'c:reveal_truth',
 
@@ -72,6 +74,12 @@ export const S2C = {
    * payload 只带语义:{ questionId, from, to }。
    */
   JUDGEMENT_CORRECTED: 's:judgement_corrected',
+  /**
+   * 出题人被转移(SPEC §7 中段接管)。**独立事件** —— 局中换判定的人是件大事,
+   * 光靠 room_state 里 oracleId 变了,桌上的人不一定会注意到。
+   * payload 只带语义:{ from, to }(playerId,不带昵称)。
+   */
+  ORACLE_TRANSFERRED: 's:oracle_transferred',
   /** 所有拒绝走这一条。payload = { code: ErrorCode }。**不带中文。** */
   ERROR: 's:error',
 } as const;
@@ -132,6 +140,11 @@ export const ERROR_CODES = [
   'SUBMISSION_PENDING',
   'SUBMISSION_NOT_FOUND',
   'NOT_REVEAL_PHASE',
+  /**
+   * client 侧专用:认领成功,但它记着的房间已经不在了(server 重启)。
+   * **server 从不发这个** —— 它是 client 对完账之后自己用来查文案的 key。
+   */
+  'ROOM_GONE',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

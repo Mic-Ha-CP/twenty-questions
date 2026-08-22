@@ -108,10 +108,18 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
       data.playerId = playerId;
       data.nickname = normalizeDisplayName(p?.nickname) ?? '';
       sockets.set(playerId, socket);
-      socket.emit(S2C.HELLO_OK, { playerId });
+
+      const room = manager.byPlayer(playerId);
+      /*
+       * **认领的回执要带上「你现在在哪个房间」。**
+       * server 重启后 client 会自动重连、认领也会成功,但它记着的房间已经随进程
+       * 蒸发(ADR-12 零持久化)。不明说的话 client 会留在死屏上,点一下收一条
+       * 「你不在房间里」—— 用户看到的是界面永远不动。
+       * 这里给出事实(`code` 或 `null`),让 client 自己退回 landing。
+       */
+      socket.emit(S2C.HELLO_OK, { playerId, roomCode: room?.code ?? null });
 
       // 断线重连:playerId 还在某个房间里 → 重新绑上去,不当新人处理(SPEC §7)。
-      const room = manager.byPlayer(playerId);
       if (room) {
         socket.leave(LOBBY_CHANNEL);
         socket.join(roomChannel(room.code));
@@ -246,7 +254,29 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
       const raw = (payload as { playerId?: unknown } | null)?.playerId;
       const targetId = raw === null ? null : typeof raw === 'string' ? raw : undefined;
       if (targetId === undefined) return fail('INVALID_PAYLOAD');
-      settle(a.room, a.room.assignOracle(a.playerId, targetId, Date.now()));
+
+      const from = a.room.oracleId;
+      const r = a.room.assignOracle(a.playerId, targetId, Date.now());
+      if (!r.ok) return fail(r.error);
+
+      // 局中换判定的人是件大事 —— 发个独立事件,别让它埋在 room_state 的差异里。
+      if (from !== a.room.oracleId) {
+        io.to(roomChannel(a.room.code)).emit(S2C.ORACLE_TRANSFERRED, {
+          from,
+          to: a.room.oracleId,
+        });
+      }
+      commit(a.room);
+    });
+
+    /** 改**下一局**的出题人(reveal 专用,和上面的中段接管不是一回事)。 */
+    socket.on(C2S.SET_NEXT_ORACLE, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const raw = (payload as { playerId?: unknown } | null)?.playerId;
+      const targetId = raw === null ? null : typeof raw === 'string' ? raw : undefined;
+      if (targetId === undefined) return fail('INVALID_PAYLOAD');
+      settle(a.room, a.room.setNextOracle(a.playerId, targetId, Date.now()));
     });
 
     /* ── phase ── */

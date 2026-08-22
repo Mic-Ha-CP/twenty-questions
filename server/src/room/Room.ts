@@ -103,6 +103,11 @@ export class Room {
   budgetLeft: number | null = null;
   /** 收束结果。非 null = 这一局结束了。 */
   outcome: RoundOutcome | null = null;
+  /**
+   * 下一局的出题人(SPEC §3 交接)。收束时按策略定默认值,host 可在 reveal 改。
+   * **只在 reveal 期间有意义**,`startNextRound` 应用完就归零。
+   */
+  nextOracleId: PlayerId | null = null;
   /** 本局开始计时的锚点,用来算 durationMs。 */
   private playingStartedAt = 0;
   private seq = 0;
@@ -390,14 +395,35 @@ export class Room {
   /**
    * host 指派 / 改派 —— **可以覆盖已占的座位**(这是 host 的权力,不是竞争)。
    * `targetId === null` = 清空座位。
-   * SPEC §7 的「oracle 接管」将来复用这条路径,且不限 lobby phase;
-   * scaffold 阶段中段 phase 还是空壳,所以暂不放行非 lobby。
+   *
+   * **任意 phase 都可以**,这就是 SPEC §7 的「oracle 接管」:
+   * oracle 掉线超宽限、或 host 任何时刻判断需要,换个人接着判。
+   * 真相在系统里(`puzzle.truth`),换人不换题 —— **游戏不死**,这是「录题」这个
+   * 设计决策的红利。
+   *
+   * **绝不碰牌局状态**:队列、历史、额度、pending、还原全都不动。
+   * 接管者自己队里的问题也保留(不退额度)—— co-op 里 ta 现在知道答案,
+   * 自己判掉那条不构成作弊,而退额度会破坏「入队即扣不退」。
+   *
+   * ⚠️ 与 `setNextOracle` 不是一回事:那个改的是**下一局**谁出题(reveal 专用)。
    */
   assignOracle(requesterId: PlayerId, targetId: PlayerId | null, now: number): Result<void> {
     if (!this.isHost(requesterId)) return err('NOT_HOST');
-    if (this.phase !== 'lobby') return err('NOT_LOBBY_PHASE');
     if (targetId !== null && !this.has(targetId)) return err('PLAYER_NOT_FOUND');
     this.oracleId = targetId;
+    this.touch(now);
+    return OK;
+  }
+
+  /**
+   * 改**下一局**的出题人(SPEC §3 的「下一局出题人」行)。
+   * 只有 host、只在 reveal —— 局中改人是 `assignOracle`(接管),不是这个。
+   */
+  setNextOracle(requesterId: PlayerId, targetId: PlayerId | null, now: number): Result<void> {
+    if (!this.isHost(requesterId)) return err('NOT_HOST');
+    if (this.phase !== 'reveal') return err('NOT_REVEAL_PHASE');
+    if (targetId !== null && !this.has(targetId)) return err('PLAYER_NOT_FOUND');
+    this.nextOracleId = targetId;
     this.touch(now);
     return OK;
   }
@@ -734,6 +760,13 @@ export class Room {
       truth: this.puzzle?.truth ?? '',
       via,
     };
+    /*
+     * 交接的默认值(SPEC §3):
+     *   猜中了 → **猜中者接棒**;
+     *   没猜中 → **oracle 连任**(不是空座 —— 空座会让下一局卡在 start gate)。
+     * host 可以在 reveal 里改(setNextOracle)。
+     */
+    this.nextOracleId = winnerId ?? this.oracleId;
     this.phase = 'reveal';
     this.touch(now);
   }
@@ -753,25 +786,33 @@ export class Room {
     this.submissions = [];
     this.budgetLeft = null;
     this.outcome = null;
+    this.nextOracleId = null;
     this.playingStartedAt = 0;
     this.touch(now);
   }
 
   /**
-   * reveal → setup(再来一局)。
+   * reveal → setup(再来一局)。**交接在这条边上落地。**
    *
-   * **出题人交接的策略(默认猜中者接棒 / 未猜中则 oracle 连任)属于 reveal 屏那一刀**,
-   * 这里只做归位与相位翻转,不擅自改座位。
+   * 顺序要紧:先把 `nextOracleId` 应用到座位,再归位(归位会清掉 nextOracleId)。
    */
   startNextRound(requesterId: PlayerId, now: number): Result<void> {
     if (!this.isHost(requesterId)) return err('NOT_HOST');
     if (!canTransition(this.phase, 'setup')) return err('NOT_REVEAL_PHASE');
+
+    // 接棒的人可能在 reveal 期间跑了 —— 那就空座,让活人上位,而不是指向一个幽灵。
+    const heir = this.nextOracleId;
+    this.oracleId = heir !== null && this.has(heir) ? heir : null;
+
     this.resetForNextRound(now);
     this.phase = 'setup';
     return OK;
   }
 
-  /** reveal → lobby(改设置)。同样归位。 */
+  /**
+   * reveal → lobby(改设置)。同样归位。
+   * **不做交接** —— 回大厅是去改设置,不是换人;座位保持原样,要换用 assignOracle。
+   */
   backToLobby(requesterId: PlayerId, now: number): Result<void> {
     if (!this.isHost(requesterId)) return err('NOT_HOST');
     if (!canTransition(this.phase, 'lobby')) return err('NOT_REVEAL_PHASE');
@@ -841,6 +882,8 @@ export class Room {
       budgetLeft: this.budgetLeft,
       myPendingLeft: Math.max(0, this.settings.pendingCap - this.pendingCountOf(viewerId)),
       outcome: this.outcome ? { ...this.outcome } : null,
+      /** 下一局谁出题 —— 全房可见,大家都该看到交接结果。 */
+      nextOracleId: this.nextOracleId,
     };
   }
 }

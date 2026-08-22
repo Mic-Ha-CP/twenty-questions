@@ -19,7 +19,7 @@ import { JUDGING_LIMITS } from '@shared/judging';
 import { puzzleConfig, type Answer } from '@shared/puzzleTypes';
 import { Button, Kicker, Narrative, Panel, TextArea, TextInput } from '@/components/ui';
 import { ANSWER_ICON, ANSWER_MARK_CLASS } from '@/lib/strings';
-import { useIsOracle, useRoomStore } from '@/store/roomStore';
+import { useIsHost, useIsOracle, useRoomStore } from '@/store/roomStore';
 import { useT } from '@/store/langStore';
 
 export default function Playing() {
@@ -37,9 +37,11 @@ export default function Playing() {
 
       <BudgetBar />
       <CorrectionNotice />
+      <OracleTransferNotice />
       <Stream />
       {isOracle ? <OracleControls /> : <GuesserControls />}
       <Submissions />
+      <TransferOracle />
       {isOracle && <RevealTruthButton />}
     </div>
   );
@@ -87,6 +89,80 @@ function CorrectionNotice() {
       {' → '}
       {correction.to && <b>{t('answer', correction.to)}</b>}
     </div>
+  );
+}
+
+/**
+ * 出题人被转移的提示(SPEC §7 接管)。
+ * 局中换判定的人是件大事 —— 光靠 `oracleId` 在 room_state 里悄悄变了,
+ * 桌上的人不一定会注意到,而「谁在判」直接决定这条推理链还算不算数。
+ */
+function OracleTransferNotice() {
+  const t = useT();
+  const room = useRoomStore((s) => s.room)!;
+  const transfer = useRoomStore((s) => s.oracleTransfer);
+  const clear = useRoomStore((s) => s.clearOracleTransfer);
+
+  useEffect(() => {
+    if (!transfer) return;
+    const id = setTimeout(clear, 6000);
+    return () => clearTimeout(id);
+  }, [transfer, clear]);
+
+  if (!transfer) return null;
+  const to = room.players.find((p) => p.id === transfer.to);
+  return (
+    <div className="rounded border border-judge-unclear/50 bg-panel px-4 py-2 text-sm text-ink">
+      {t('ui', 'oracle.transferred')}
+      {to ? ` → ${to.nickname}` : ''}
+    </div>
+  );
+}
+
+/**
+ * host 的中段接管入口(SPEC §7)。
+ * oracle 掉线超宽限、或任何时刻 host 判断需要 —— 换个人接着判,题不变。
+ * **必要接线而已**,视觉细调留下一刀。
+ */
+function TransferOracle() {
+  const t = useT();
+  const room = useRoomStore((s) => s.room)!;
+  const isHost = useIsHost();
+  const { assignOracle } = useRoomStore();
+  const [open, setOpen] = useState(false);
+
+  if (!isHost) return null;
+
+  if (!open) {
+    return (
+      <Button className="self-center px-2.5 py-1 text-xs" onClick={() => setOpen(true)}>
+        {t('ui', 'oracle.transferTo')}
+      </Button>
+    );
+  }
+  return (
+    <Panel className="p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted">{t('ui', 'oracle.transferTo')}</span>
+        {room.players
+          .filter((p) => p.id !== room.oracleId)
+          .map((p) => (
+            <Button
+              key={p.id}
+              className="px-2.5 py-1 text-xs"
+              onClick={() => {
+                assignOracle(p.id);
+                setOpen(false);
+              }}
+            >
+              {p.nickname}
+            </Button>
+          ))}
+        <Button className="ml-auto px-2.5 py-1 text-xs" onClick={() => setOpen(false)}>
+          {t('ui', 'play.cancel')}
+        </Button>
+      </div>
+    </Panel>
   );
 }
 

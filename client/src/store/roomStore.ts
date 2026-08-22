@@ -14,6 +14,7 @@ import type { Answer } from '@shared/puzzleTypes';
 import type { RoomSettings, RoomState, RoomSummary } from '@shared/types';
 import { getSocket, onGateOverflow, onGateState, sendGated } from '@/lib/socket';
 import { rememberNickname } from '@/lib/nickname';
+import { reconcilePresence } from '@/lib/presence';
 
 export type Conn = 'connecting' | 'online' | 'offline';
 
@@ -36,10 +37,13 @@ interface RoomStore {
    * 不能只靠 Q&A 流里那个小标记(SPEC §5)。
    */
   correction: { questionId: string; from: Answer | null; to: Answer | null } | null;
+  /** 出题人刚刚被转移(SPEC §7 接管)。局中换判定的人要看得见。 */
+  oracleTransfer: { from: string | null; to: string | null } | null;
 
   clearError: () => void;
   clearSuggestion: () => void;
   clearCorrection: () => void;
+  clearOracleTransfer: () => void;
 
   /* — actions:只 emit,不改本地状态 — */
   subscribeLobby: () => void;
@@ -72,6 +76,8 @@ interface RoomStore {
   revealTruth: () => void;
   startNextRound: () => void;
   backToLobby: () => void;
+  /** reveal:改下一局出题人(host-only)。和中段接管 assignOracle 不是一回事。 */
+  setNextOracle: (playerId: string | null) => void;
 }
 
 /**
@@ -89,10 +95,12 @@ export const useRoomStore = create<RoomStore>((set) => ({
   error: null,
   suggestion: null,
   correction: null,
+  oracleTransfer: null,
 
   clearError: () => set({ error: null }),
   clearSuggestion: () => set({ suggestion: null }),
   clearCorrection: () => set({ correction: null }),
+  clearOracleTransfer: () => set({ oracleTransfer: null }),
 
   subscribeLobby: () => emit(C2S.LOBBY_SUBSCRIBE),
   createRoom: (isPrivate) => emit(C2S.CREATE_ROOM, { isPrivate }),
@@ -127,6 +135,7 @@ export const useRoomStore = create<RoomStore>((set) => ({
   revealTruth: () => emit(C2S.REVEAL_TRUTH),
   startNextRound: () => emit(C2S.START_NEXT_ROUND),
   backToLobby: () => emit(C2S.BACK_TO_LOBBY),
+  setNextOracle: (playerId) => emit(C2S.SET_NEXT_ORACLE, { playerId }),
 }));
 
 /** 接线一次。App 挂载时调。 */
@@ -154,6 +163,23 @@ export function wireRoomSocket(): () => void {
   const onClosed = () => set({ room: null });
   const onKicked = () => set({ room: null });
   const onSuggestion = (payload: { word: string }) => set({ suggestion: payload.word });
+
+  /**
+   * 认领回执:和本地记的房间对一次账。
+   * server 重启过的话,这里就是**唯一**能发现「我记着的房间已经没了」的时机 ——
+   * 否则界面会停在死屏上,点一下报一次 NOT_IN_ROOM(NOTES session 3 实测)。
+   */
+  const onHelloOk = (payload: { playerId: string; roomCode: string | null }) => {
+    const decision = reconcilePresence({
+      localCode: useRoomStore.getState().room?.code ?? null,
+      serverCode: payload.roomCode ?? null,
+    });
+    if (decision.clearRoom) set({ room: null });
+    if (decision.notice) set({ error: decision.notice });
+  };
+
+  const onOracleTransferred = (payload: { from: string | null; to: string | null }) =>
+    set({ oracleTransfer: payload });
   const onCorrected = (payload: {
     questionId: string;
     from: Answer | null;
@@ -169,6 +195,8 @@ export function wireRoomSocket(): () => void {
   s.on(S2C.KICKED, onKicked);
   s.on(S2C.ANSWER_WORD_SUGGESTION, onSuggestion);
   s.on(S2C.JUDGEMENT_CORRECTED, onCorrected);
+  s.on(S2C.HELLO_OK, onHelloOk);
+  s.on(S2C.ORACLE_TRANSFERRED, onOracleTransferred);
   if (s.connected) set({ conn: 'online' });
 
   return () => {
@@ -183,6 +211,8 @@ export function wireRoomSocket(): () => void {
     s.off(S2C.KICKED, onKicked);
     s.off(S2C.ANSWER_WORD_SUGGESTION, onSuggestion);
     s.off(S2C.JUDGEMENT_CORRECTED, onCorrected);
+    s.off(S2C.HELLO_OK, onHelloOk);
+    s.off(S2C.ORACLE_TRANSFERRED, onOracleTransferred);
   };
 }
 

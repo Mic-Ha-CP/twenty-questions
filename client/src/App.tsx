@@ -11,12 +11,11 @@
  */
 
 import { useEffect } from 'react';
-import { Button, Kicker, Narrative, Panel } from '@/components/ui';
 import Landing from '@/screens/Landing';
 import Lobby from '@/screens/Lobby';
 import Playing from '@/screens/Playing';
+import Reveal from '@/screens/Reveal';
 import Setup from '@/screens/Setup';
-import { useIsHost } from '@/store/roomStore';
 import { useLangStore, useT } from '@/store/langStore';
 import { useRoomStore, wireRoomSocket } from '@/store/roomStore';
 
@@ -77,61 +76,6 @@ function PhaseScreen() {
     case 'playing':
       return <Playing />;
     case 'reveal':
-      return <RevealStub />;
+      return <Reveal />;
   }
-}
-
-/**
- * ⚠️ **reveal 的最小壳,不是 reveal 屏。**
- *
- * 完整的 reveal(结果呈现 + **下一局出题人交接**:默认猜中者接棒 / 未猜中则 oracle
- * 连任 / host 可改,SPEC §3)是下一刀的活。这里只做两件事:
- *   1. 把真相摆出来 —— 否则这一局没有终点;
- *   2. 给 host 两个出口 —— 否则房间会永远卡在 reveal。
- * 两个出口都会触发 `resetForNextRound`,第二局不带脏状态。
- */
-function RevealStub() {
-  const t = useT();
-  const room = useRoomStore((s) => s.room)!;
-  const isHost = useIsHost();
-  const { startNextRound, backToLobby } = useRoomStore();
-  const outcome = room.outcome;
-  const winner = room.players.find((p) => p.id === outcome?.winnerId);
-
-  return (
-    <div className="mx-auto flex min-h-full max-w-xl flex-col justify-center gap-4 px-6 py-16">
-      <Panel className="p-6">
-        <Kicker>{outcome ? t('ui', `reveal.${outcome.result}`) : t('phase', 'reveal')}</Kicker>
-        {winner && (
-          <p className="mt-2 text-sm text-accent">
-            {t('ui', 'reveal.winner')}:{winner.nickname}
-          </p>
-        )}
-        {outcome && (
-          <>
-            <div className="mt-4 text-xs text-muted">{t('ui', 'reveal.truth')}</div>
-            <Narrative className="mt-1">{outcome.truth}</Narrative>
-            <p className="mt-4 text-xs text-muted">
-              {t('ui', 'reveal.questionsUsed')} {outcome.questionsUsed} ·{' '}
-              {t('ui', 'reveal.duration')} {Math.round(outcome.durationMs / 1000)}s
-            </p>
-          </>
-        )}
-      </Panel>
-
-      {isHost && (
-        <div className="flex gap-3">
-          <Button variant="solid" className="flex-1" onClick={startNextRound}>
-            {t('ui', 'reveal.nextRound')}
-          </Button>
-          <Button className="flex-1" onClick={backToLobby}>
-            {t('ui', 'reveal.backToLobby')}
-          </Button>
-        </div>
-      )}
-      <p className="text-center text-[11px] text-muted">
-        reveal 屏(含出题人交接)是下一刀 —— 见 docs/ROADMAP.md
-      </p>
-    </div>
-  );
 }

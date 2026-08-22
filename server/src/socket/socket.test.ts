@@ -53,6 +53,8 @@ afterEach(() => {
 /** 每个 client 把收到的事件全存下来,避免「监听器注册晚了」这种测试脚本 bug。 */
 interface Probe {
   s: ClientSocket;
+  /** `s:hello_ok` 的 payload —— 幽灵房间那组用它。 */
+  hello: { playerId: string; roomCode: string | null } | null;
   states: RoomState[];
   errors: string[];
   lobby: RoomSummary[][];
@@ -69,6 +71,7 @@ async function connect(playerId: string, nickname: string): Promise<Probe> {
 
   const p: Probe = {
     s,
+    hello: null,
     states: [],
     errors: [],
     lobby: [],
@@ -89,7 +92,12 @@ async function connect(playerId: string, nickname: string): Promise<Probe> {
 
   await new Promise<void>((r) => s.on('connect', () => r()));
   s.emit(C2S.HELLO, { playerId, nickname });
-  await new Promise<void>((r) => s.once(S2C.HELLO_OK, () => r()));
+  await new Promise<void>((r) =>
+    s.once(S2C.HELLO_OK, (payload: { playerId: string; roomCode: string | null }) => {
+      p.hello = payload;
+      r();
+    }),
+  );
   return p;
 }
 
@@ -111,6 +119,59 @@ describe('身份与 lobby 频道', () => {
     l.s.emit(C2S.LOBBY_SUBSCRIBE);
     await settle(60);
     expect(l.lobby).toHaveLength(1); // 立即到达,没等 50ms 窗口
+  });
+});
+
+describe('幽灵房间:认领成功,但房间已经不在了', () => {
+  /**
+   * 本地 smoke 实测发现的:server 重启后 client 自动重连、`c:hello` 也成功了,
+   * 但它记着的那个房间已经随进程一起蒸发(ADR-12:零持久化)。
+   * 旧行为是 client 留在死屏上,每点一下收一条「你不在房间里」——
+   * 用户看到的是一个永远不动的界面。
+   *
+   * 修法:**`s:hello_ok` 直接告诉 client 它现在在哪个房间(或者哪儿都不在)**,
+   * client 据此自己退回 landing。server 不需要知道 client 记着什么。
+   */
+  it('**`s:hello_ok` 带上 roomCode** —— 人在房里就给码', async () => {
+    const a = await connect('pid-A', '甲');
+    a.s.emit(C2S.CREATE_ROOM, { isPrivate: false });
+    await settle();
+    const code = a.state().code;
+
+    // 同一个 playerId 换条 socket 回来(断线重连)
+    const again = await connect('pid-A', '甲');
+    expect(again.hello?.roomCode).toBe(code);
+  });
+
+  it('**房间没了 → roomCode 是 null**,而不是让 client 自己去猜', async () => {
+    const a = await connect('pid-A', '甲');
+    a.s.emit(C2S.CREATE_ROOM, { isPrivate: false });
+    await settle();
+    const code = a.state().code;
+
+    // 模拟 server 重启:房间随进程蒸发
+    manager.remove(code, 'empty');
+
+    const again = await connect('pid-A', '甲');
+    expect(again.hello?.roomCode).toBeNull();
+  });
+
+  it('从来没进过房的人,roomCode 也是 null', async () => {
+    const fresh = await connect('pid-Z', '路人');
+    expect(fresh.hello?.roomCode).toBeNull();
+  });
+
+  it('房间没了之后,后续操作仍然是 NOT_IN_ROOM(server 侧行为不变)', async () => {
+    const a = await connect('pid-A', '甲');
+    a.s.emit(C2S.CREATE_ROOM, { isPrivate: false });
+    await settle();
+    manager.remove(a.state().code, 'empty');
+
+    const again = await connect('pid-A', '甲');
+    again.clearErrors();
+    again.s.emit(C2S.SET_READY, { ready: true });
+    await settle();
+    expect(again.errors).toEqual(['NOT_IN_ROOM']);
   });
 });
 

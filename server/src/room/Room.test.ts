@@ -122,14 +122,20 @@ describe('oracle 座位:先到先得(必测 7)', () => {
     expect(r.oracleId).toBeNull();
   });
 
-  it('assignOracle 目前限 lobby phase —— 中段接管留给断线 session,别提前放行', () => {
+  /**
+   * ⚠️ 这条断言在 session 1/2 是反的(那时 `assignOracle` 限 lobby,故意没放行)。
+   * session 4 落地 SPEC §7 的「oracle 接管」后**主动解除**了那道限制 ——
+   * 不是实现漂移,是那个约束到期了。中段接管的完整用例在 `handoff.test.ts`。
+   */
+  it('assignOracle 中段也放行 —— SPEC §7 的 oracle 接管', () => {
     const r = roomWith(1);
     r.claimOracle('p0', T0);
     r.setReady('host', true, T0);
     r.setReady('p0', true, T0);
     r.startGame('host', T0);
     expect(r.phase).toBe('setup');
-    expect(r.assignOracle('host', 'host', T0)).toEqual({ ok: false, error: 'NOT_LOBBY_PHASE' });
+    expect(r.assignOracle('host', 'host', T0).ok).toBe(true);
+    expect(r.oracleId).toBe('host');
   });
 });
 

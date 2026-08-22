@@ -113,6 +113,7 @@ const zh: Dict = {
     SUBMISSION_PENDING: '你已经有一条还原在等回复',
     SUBMISSION_NOT_FOUND: '找不到这条还原',
     NOT_REVEAL_PHASE: '现在不是揭晓阶段',
+    ROOM_GONE: '房间已不存在 —— 服务器重启过,这一局没有保存',
   },
   ui: {
     'app.title': '海龟汤 · 暗房',
@@ -214,6 +215,13 @@ const zh: Dict = {
     'reveal.duration': '用时',
     'reveal.nextRound': '再来一局',
     'reveal.backToLobby': '回大厅改设置',
+    'reveal.nextOracle': '下一局出题人',
+    'reveal.hitQuestion': '命中的那一问',
+    'reveal.hitSubmission': '命中的还原',
+    'reveal.change': '改派',
+    'reveal.noOracle': '暂不指定',
+    'oracle.transferred': '出题人已转移',
+    'oracle.transferTo': '转移出题人',
   },
 };
 
@@ -272,6 +280,7 @@ const en: Dict = {
     SUBMISSION_PENDING: 'You already have a solution awaiting a reply',
     SUBMISSION_NOT_FOUND: 'Solution not found',
     NOT_REVEAL_PHASE: 'Not in the reveal phase',
+    ROOM_GONE: 'That room is gone — the server restarted and rounds are not saved',
   },
   ui: {
     'app.title': 'The Dark Room',
@@ -373,6 +382,13 @@ const en: Dict = {
     'reveal.duration': 'Time',
     'reveal.nextRound': 'Another round',
     'reveal.backToLobby': 'Back to the lobby',
+    'reveal.nextOracle': 'Next oracle',
+    'reveal.hitQuestion': 'The question that got it',
+    'reveal.hitSubmission': 'The solution that got it',
+    'reveal.change': 'Change',
+    'reveal.noOracle': 'Leave it open',
+    'oracle.transferred': 'The oracle seat changed hands',
+    'oracle.transferTo': 'Hand the seat to',
   },
 };
 
