@@ -13,6 +13,7 @@
 import type { Server, Socket } from 'socket.io';
 import { C2S, S2C, type ErrorCode, type Result } from '@shared/events';
 import { normalizeDisplayName } from '@shared/names';
+import type { Answer } from '@shared/puzzleTypes';
 import type { PlayerId, RoomSettings, RoomSummary } from '@shared/types';
 import { findPuzzle, listAvailable, suggestAnswerWord } from '../game/puzzleBank';
 import { LobbyBroadcaster } from '../room/LobbyBroadcaster';
@@ -298,6 +299,83 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
      * 20Q 的随机建议词。**点对点回给 oracle,不广播** —— 广播就等于把候选词
      * 发给了所有 guesser。这不是房间状态,所以不走 commit()。
      */
+    /* ── playing:判定循环(SPEC §5)。守卫全在 Room 里 ── */
+    socket.on(C2S.ASK_QUESTION, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      settle(a.room, a.room.askQuestion(a.playerId, (payload as { text?: unknown })?.text, Date.now()));
+    });
+
+    socket.on(C2S.JUDGE, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const answer = (payload as { answer?: unknown } | null)?.answer;
+      if (typeof answer !== 'string') return fail('INVALID_PAYLOAD');
+      settle(a.room, a.room.judge(a.playerId, answer as Answer, Date.now()));
+    });
+
+    socket.on(C2S.CORRECT_LAST, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const answer = (payload as { answer?: unknown } | null)?.answer;
+      if (typeof answer !== 'string') return fail('INVALID_PAYLOAD');
+
+      const before = a.room.history[a.room.history.length - 1];
+      const previousAnswer = before?.answer ?? null;
+
+      const r = a.room.correctLast(a.playerId, answer as Answer, Date.now());
+      if (!r.ok) return fail(r.error);
+
+      // 独立的更正事件:光靠 room_state 里的 corrected 标记,client 没法就地提示
+      // 「刚才那条改判了」—— 推理链被悄悄改写是这条规则最怕的事。**只发语义。**
+      io.to(roomChannel(a.room.code)).emit(S2C.JUDGEMENT_CORRECTED, {
+        questionId: r.value.id,
+        from: previousAnswer,
+        to: r.value.answer,
+      });
+      commit(a.room);
+    });
+
+    socket.on(C2S.SUBMIT_SOLUTION, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      settle(
+        a.room,
+        a.room.submitSolution(a.playerId, (payload as { text?: unknown })?.text, Date.now()),
+      );
+    });
+
+    socket.on(C2S.RESOLVE_SUBMISSION, (payload: unknown) => {
+      const a = actor();
+      if (!a) return;
+      const p = (payload ?? {}) as { submissionId?: unknown; accept?: unknown };
+      if (typeof p.submissionId !== 'string') return fail('INVALID_PAYLOAD');
+      settle(
+        a.room,
+        a.room.resolveSubmission(a.playerId, p.submissionId, p.accept === true, Date.now()),
+      );
+    });
+
+    socket.on(C2S.REVEAL_TRUTH, () => {
+      const a = actor();
+      if (!a) return;
+      // 确认弹窗是 client 的责任(SPEC §5 防误触);server 只管执行。
+      settle(a.room, a.room.revealTruth(a.playerId, Date.now()));
+    });
+
+    /* ── reveal 出口:两条边都归位,第二局不带脏状态 ── */
+    socket.on(C2S.START_NEXT_ROUND, () => {
+      const a = actor();
+      if (!a) return;
+      settle(a.room, a.room.startNextRound(a.playerId, Date.now()));
+    });
+
+    socket.on(C2S.BACK_TO_LOBBY, () => {
+      const a = actor();
+      if (!a) return;
+      settle(a.room, a.room.backToLobby(a.playerId, Date.now()));
+    });
+
     socket.on(C2S.SUGGEST_ANSWER_WORD, (payload: unknown) => {
       const a = actor();
       if (!a) return;

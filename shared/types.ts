@@ -7,6 +7,7 @@
  * 本文件把两段用注释明确隔开;加字段前先想清楚它属于哪半边。
  */
 
+import type { Question, RoundOutcome, Submission } from './judging';
 import type { PuzzleListItem, PublicPuzzle } from './puzzles';
 import type { PuzzleTypeId } from './puzzleTypes';
 
@@ -124,4 +125,22 @@ export interface RoomState {
   bank: PuzzleListItem[] | null;
   /** 这一房把题库用光了没 —— 用光时 client 引导去自写。 */
   bankExhausted: boolean;
+
+  /* ─── playing(SPEC §5)。**队列、历史、额度、还原全房可见** ─── */
+
+  /** 未判的问题,FIFO。oracle 严格判队首。 */
+  queue: Question[];
+  /** 已判的问题,按判定顺序。被更正过的带 corrected / previousAnswer。 */
+  history: Question[];
+  /** 海龟汤的还原提交。内容全房可见 —— co-op 没有泄题问题。 */
+  submissions: Submission[];
+  /** 全房共享额度;无额度的类型恒为 null。 */
+  budgetLeft: number | null;
+  /** 自己还能提几问(pending cap 剩余)。per-viewer,方便 client 直接禁用输入框。 */
+  myPendingLeft: number;
+  /**
+   * 收束结果。**只有收束之后才非 null**,`truth` 也只在那时才对全房公开。
+   * 在此之前真相只经由 `oracleTruth` 给 oracle。
+   */
+  outcome: RoundOutcome | null;
 }

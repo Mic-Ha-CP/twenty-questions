@@ -39,6 +39,23 @@ export const C2S = {
   BEGIN_PLAYING: 'c:begin_playing',
   /** 20Q 的「随机建议」。**不是题库**,是 server 内一个词表。 */
   SUGGEST_ANSWER_WORD: 'c:suggest_answer_word',
+
+  /* — playing:判定循环(SPEC §5)— */
+  ASK_QUESTION: 'c:ask_question',
+  /** 判队首。oracle-only。 */
+  JUDGE: 'c:judge',
+  /** 对**最近一条**已判问题重判一次。oracle-only。 */
+  CORRECT_LAST: 'c:correct_last',
+  /** 海龟汤:提交还原。独立通道,不占 pending cap。 */
+  SUBMIT_SOLUTION: 'c:submit_solution',
+  /** oracle 处理还原:accept → 命中收束 / reject → 无消耗。 */
+  RESOLVE_SUBMISSION: 'c:resolve_submission',
+  /** oracle「公开汤底 · 结束本局」。client 端必须先弹确认框(SPEC §5 防误触)。 */
+  REVEAL_TRUTH: 'c:reveal_truth',
+
+  /* — reveal 出口:两条边都会归位,第二局不带脏状态 — */
+  START_NEXT_ROUND: 'c:start_next_round',
+  BACK_TO_LOBBY: 'c:back_to_lobby',
 } as const;
 
 export const S2C = {
@@ -49,6 +66,12 @@ export const S2C = {
   KICKED: 's:kicked',
   /** 建议词是点对点回给 oracle 的,不广播 —— 别人不该看见它。 */
   ANSWER_WORD_SUGGESTION: 's:answer_word_suggestion',
+  /**
+   * 判定被更正。**独立事件**,不只是靠 room_state 里那个 corrected 标记 ——
+   * client 要能就地提示「刚才那条改判了」,否则推理链会被悄悄改写。
+   * payload 只带语义:{ questionId, from, to }。
+   */
+  JUDGEMENT_CORRECTED: 's:judgement_corrected',
   /** 所有拒绝走这一条。payload = { code: ErrorCode }。**不带中文。** */
   ERROR: 's:error',
 } as const;
@@ -89,6 +112,26 @@ export const ERROR_CODES = [
   'INVALID_PUZZLE',
   /** 这个 puzzle type 没有题库(config 表 hasBank=false)。 */
   'BANK_NOT_AVAILABLE',
+  /* — playing / 判定循环 — */
+  'NOT_PLAYING_PHASE',
+  'QUEUE_EMPTY',
+  /** 额度是入队许可证 —— 归零后不能再入队(已在队的照判)。 */
+  'NO_BUDGET_LEFT',
+  /** 自己有未判问题,先等判完。与额度是两套账。 */
+  'PENDING_CAP_REACHED',
+  /** oracle 不提问、不交还原 —— ta 手上有答案。 */
+  'ORACLE_CANNOT_ASK',
+  /** 这个判定值不在 config 表的 answers 里。 */
+  'ANSWER_NOT_ALLOWED',
+  'NOTHING_TO_CORRECT',
+  /** 一条只能重判一次,防翻旧账。 */
+  'ALREADY_CORRECTED',
+  /** 这个 puzzle type 没有还原通道(guessMode !== 'submission')。 */
+  'SUBMISSION_NOT_AVAILABLE',
+  /** 自己已有一条未决还原。 */
+  'SUBMISSION_PENDING',
+  'SUBMISSION_NOT_FOUND',
+  'NOT_REVEAL_PHASE',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

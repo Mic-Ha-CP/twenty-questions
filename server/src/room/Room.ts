@@ -12,11 +12,18 @@
 import { err, ok, OK, type ErrorCode, type Result } from '@shared/events';
 import { GAME_META } from '@shared/meta';
 import { rerollUniqueName } from '@shared/names';
+import {
+  JUDGING_LIMITS,
+  type Question,
+  type RoundOutcome,
+  type Submission,
+} from '@shared/judging';
 import { PUZZLE_LIMITS, type PublicPuzzle, type PuzzleDraft, type PuzzleListItem, type SituationPuzzle } from '@shared/puzzles';
 import {
   DEFAULT_PUZZLE_TYPE,
   isPuzzleTypeId,
   puzzleConfig,
+  type Answer,
 } from '@shared/puzzleTypes';
 import type {
   Phase,
@@ -80,6 +87,25 @@ export class Room {
    * 注意:换一题之后这题**仍然算用过**,不退回列表。
    */
   readonly usedPuzzleIds = new Set<string>();
+
+  /* ─── playing:判定循环(SPEC §5)。全部随 resetForNextRound 归零 ─── */
+
+  /** 未判的,FIFO。**严格判队首** —— 批量判定 v1 不做。 */
+  queue: Question[] = [];
+  /** 已判的,按判定顺序。 */
+  history: Question[] = [];
+  /** 海龟汤的还原提交。 */
+  submissions: Submission[] = [];
+  /**
+   * 全房共享额度。**入队即扣**;无额度的类型恒为 null。
+   * 进 playing 时从 settings.budget 取,所以第二局拿到的是满额度而不是上局余额。
+   */
+  budgetLeft: number | null = null;
+  /** 收束结果。非 null = 这一局结束了。 */
+  outcome: RoundOutcome | null = null;
+  /** 本局开始计时的锚点,用来算 durationMs。 */
+  private playingStartedAt = 0;
+  private seq = 0;
 
   private readonly bank: BankPort;
 
@@ -494,6 +520,9 @@ export class Room {
     if (!canTransition(this.phase, 'playing')) return err('NOT_SETUP_PHASE');
     if (this.puzzle === null) return err('NO_PUZZLE_SET');
     this.phase = 'playing';
+    // 额度在这里才装填 —— 取 settings 而不是接着上一局的余额。
+    this.budgetLeft = this.settings.budget;
+    this.playingStartedAt = now;
     this.touch(now);
     return OK;
   }
@@ -506,6 +535,250 @@ export class Room {
   /** 本房还能选的题(已用的不出现)。无题库的类型恒为空。 */
   availablePuzzles(): PuzzleListItem[] {
     return this.hasBank() ? this.bank.list(this.usedPuzzleIds) : [];
+  }
+
+  /* ═══════════════ playing:判定循环(SPEC §5)═══════════════ */
+
+  /** 这个 puzzle type 允许的判定值 —— **读 config 表**,不判类型。 */
+  private allowedAnswers(): readonly Answer[] {
+    return puzzleConfig(this.settings.puzzleType).answers;
+  }
+
+  /** 有没有独立的「提交还原」通道。同样只看表。 */
+  hasSubmissionChannel(): boolean {
+    return puzzleConfig(this.settings.puzzleType).guessMode === 'submission';
+  }
+
+  /** 某人手上还有几条未判的问题。**只数 queue,不数还原。** */
+  pendingCountOf(id: PlayerId): number {
+    return this.queue.reduce((n, q) => (q.askerId === id ? n + 1 : n), 0);
+  }
+
+  /**
+   * 入队提问。
+   *
+   * **两道闸各管各的:**
+   *   · pending cap —— 被它拦住时**不扣额度**(所以先查它);
+   *   · 额度       —— 通过之后才扣,扣了就不退。
+   * 顺序反了会出现「被 cap 拒了却掉了一点额度」这种静默错账。
+   */
+  askQuestion(requesterId: PlayerId, text: unknown, now: number): Result<Question> {
+    if (this.phase !== 'playing') return err('NOT_PLAYING_PHASE');
+    if (!this.has(requesterId)) return err('NOT_IN_ROOM');
+    if (this.isOracle(requesterId)) return err('ORACLE_CANNOT_ASK');
+
+    const body = trimmed(text);
+    if (!body || body.length > JUDGING_LIMITS.questionMax) return err('INVALID_PAYLOAD');
+
+    if (this.pendingCountOf(requesterId) >= this.settings.pendingCap) {
+      return err('PENDING_CAP_REACHED');
+    }
+    // 额度是**入队许可证**:归零后进不来,但已经在队里的照判。
+    if (this.budgetLeft !== null && this.budgetLeft <= 0) return err('NO_BUDGET_LEFT');
+
+    const q: Question = {
+      id: `q${++this.seq}`,
+      askerId: requesterId,
+      text: body,
+      askedAt: now,
+      answer: null,
+      answeredAt: null,
+      corrected: false,
+      previousAnswer: null,
+    };
+    this.queue.push(q);
+    if (this.budgetLeft !== null) this.budgetLeft -= 1; // ← 入队即扣
+    this.touch(now);
+    return ok(q);
+  }
+
+  /** 判队首。**严格 FIFO**,不能挑。 */
+  judge(requesterId: PlayerId, answer: Answer, now: number): Result<Question> {
+    if (!this.isOracle(requesterId)) return err('NOT_ORACLE');
+    if (this.phase !== 'playing') return err('NOT_PLAYING_PHASE');
+    if (!this.allowedAnswers().includes(answer)) return err('ANSWER_NOT_ALLOWED');
+
+    const q = this.queue.shift();
+    if (!q) return err('QUEUE_EMPTY');
+
+    q.answer = answer;
+    q.answeredAt = now;
+    this.history.push(q);
+    this.touch(now);
+
+    this.settleAfterJudgement(q, now);
+    return ok(q);
+  }
+
+  /**
+   * 对**最近一条**已判问题重判一次。
+   * 只限最近一条、只限一次 —— 防翻旧账把推理链搅乱(SPEC §5)。
+   */
+  correctLast(requesterId: PlayerId, answer: Answer, now: number): Result<Question> {
+    if (!this.isOracle(requesterId)) return err('NOT_ORACLE');
+    if (this.phase !== 'playing') return err('NOT_PLAYING_PHASE');
+    if (!this.allowedAnswers().includes(answer)) return err('ANSWER_NOT_ALLOWED');
+
+    const last = this.history[this.history.length - 1];
+    if (!last) return err('NOTHING_TO_CORRECT');
+    if (last.corrected) return err('ALREADY_CORRECTED');
+
+    last.previousAnswer = last.answer;
+    last.answer = answer;
+    last.corrected = true;
+    last.answeredAt = now;
+    this.touch(now);
+
+    // 改成 CORRECT 一样要收束 —— 改错不是绕过收束的后门。
+    this.settleAfterJudgement(last, now);
+    return ok(last);
+  }
+
+  /**
+   * 一次判定之后的收束检查。两种结束方式:
+   *   · CORRECT   → 命中,提问者记为命中者;
+   *   · 额度归零 + 队列判空 + 没命中 → guessers 失败。
+   */
+  private settleAfterJudgement(q: Question, now: number): void {
+    if (q.answer === 'CORRECT') {
+      this.converge('hit', q.askerId, 'judgment', now);
+      return;
+    }
+    if (this.budgetLeft !== null && this.budgetLeft <= 0 && this.queue.length === 0) {
+      this.converge('exhausted', null, null, now);
+    }
+  }
+
+  /* ─────────── 海龟汤:提交还原(独立通道)─────────── */
+
+  /**
+   * 提交还原。**不占 pending cap** —— 它有自己那条「每人最多 1 条未决」的账。
+   * 内容全房可见(co-op 无泄题问题)。
+   */
+  submitSolution(requesterId: PlayerId, text: unknown, now: number): Result<Submission> {
+    if (this.phase !== 'playing') return err('NOT_PLAYING_PHASE');
+    if (!this.has(requesterId)) return err('NOT_IN_ROOM');
+    if (this.isOracle(requesterId)) return err('ORACLE_CANNOT_ASK');
+    if (!this.hasSubmissionChannel()) return err('SUBMISSION_NOT_AVAILABLE');
+
+    const body = trimmed(text);
+    if (!body || body.length > JUDGING_LIMITS.submissionMax) return err('INVALID_PAYLOAD');
+
+    const hasPending = this.submissions.some(
+      (x) => x.playerId === requesterId && x.status === 'pending',
+    );
+    if (hasPending) return err('SUBMISSION_PENDING');
+
+    const sub: Submission = {
+      id: `s${++this.seq}`,
+      playerId: requesterId,
+      text: body,
+      submittedAt: now,
+      status: 'pending',
+      resolvedAt: null,
+    };
+    this.submissions.push(sub);
+    this.touch(now);
+    return ok(sub);
+  }
+
+  /** accept → 命中收束;reject → 继续,**无任何消耗**。 */
+  resolveSubmission(
+    requesterId: PlayerId,
+    submissionId: string,
+    accept: boolean,
+    now: number,
+  ): Result<Submission> {
+    if (!this.isOracle(requesterId)) return err('NOT_ORACLE');
+    if (this.phase !== 'playing') return err('NOT_PLAYING_PHASE');
+
+    const sub = this.submissions.find((x) => x.id === submissionId && x.status === 'pending');
+    if (!sub) return err('SUBMISSION_NOT_FOUND');
+
+    sub.status = accept ? 'accepted' : 'rejected';
+    sub.resolvedAt = now;
+    this.touch(now);
+
+    if (accept) this.converge('hit', sub.playerId, 'submission', now);
+    return ok(sub);
+  }
+
+  /**
+   * oracle 主动「公开汤底 · 结束本局」→ 记为**未猜中**。
+   * client 端必须先弹确认框(SPEC §5 防误触);server 只管执行。
+   */
+  revealTruth(requesterId: PlayerId, now: number): Result<void> {
+    if (!this.isOracle(requesterId)) return err('NOT_ORACLE');
+    if (this.phase !== 'playing') return err('NOT_PLAYING_PHASE');
+    this.converge('revealed', null, null, now);
+    return OK;
+  }
+
+  /**
+   * 收束:playing → reveal。
+   *
+   * **真相在这里被快照进 outcome** —— 于是归位时可以放心清掉 puzzle,
+   * reveal 屏仍然有东西可显示。
+   */
+  private converge(
+    result: RoundOutcome['result'],
+    winnerId: PlayerId | null,
+    via: RoundOutcome['via'],
+    now: number,
+  ): void {
+    this.outcome = {
+      result,
+      winnerId,
+      questionsUsed: this.history.length + this.queue.length,
+      durationMs: Math.max(0, now - this.playingStartedAt),
+      truth: this.puzzle?.truth ?? '',
+      via,
+    };
+    this.phase = 'reveal';
+    this.touch(now);
+  }
+
+  /* ─────────── 归位:第二局不许带脏状态 ─────────── */
+
+  /**
+   * 清掉**这一局**的所有东西。
+   *
+   * 不动的:座位、host、玩家、设置,以及 **`usedPuzzleIds`** ——
+   * 已用题跨局保留,同一晚不该重复出同一道题(SPEC §6)。
+   */
+  resetForNextRound(now: number): void {
+    this.puzzle = null;
+    this.queue = [];
+    this.history = [];
+    this.submissions = [];
+    this.budgetLeft = null;
+    this.outcome = null;
+    this.playingStartedAt = 0;
+    this.touch(now);
+  }
+
+  /**
+   * reveal → setup(再来一局)。
+   *
+   * **出题人交接的策略(默认猜中者接棒 / 未猜中则 oracle 连任)属于 reveal 屏那一刀**,
+   * 这里只做归位与相位翻转,不擅自改座位。
+   */
+  startNextRound(requesterId: PlayerId, now: number): Result<void> {
+    if (!this.isHost(requesterId)) return err('NOT_HOST');
+    if (!canTransition(this.phase, 'setup')) return err('NOT_REVEAL_PHASE');
+    this.resetForNextRound(now);
+    this.phase = 'setup';
+    return OK;
+  }
+
+  /** reveal → lobby(改设置)。同样归位。 */
+  backToLobby(requesterId: PlayerId, now: number): Result<void> {
+    if (!this.isHost(requesterId)) return err('NOT_HOST');
+    if (!canTransition(this.phase, 'lobby')) return err('NOT_REVEAL_PHASE');
+    this.resetForNextRound(now);
+    this.phase = 'lobby';
+    for (const p of this.players) p.isReady = false;
+    return OK;
   }
 
   /* ───────────────────── projections ──────────────────── */
@@ -556,6 +829,18 @@ export class Room {
       oracleTruth: isOracle ? (this.puzzle?.truth ?? null) : null,
       bank: isOracle && this.hasBank() ? this.availablePuzzles() : null,
       bankExhausted: this.hasBank() && this.availablePuzzles().length === 0,
+
+      /*
+       * 队列 / 历史 / 还原 / 额度都是**全房可见**的:co-op 共享同一条推理链,
+       * 迟到的人也不该有信息差(SPEC §7)。这里没有可遮的东西 ——
+       * 唯一的秘密仍然只有 truth,它只走 oracleTruth 和收束后的 outcome。
+       */
+      queue: this.queue.map((q) => ({ ...q })),
+      history: this.history.map((q) => ({ ...q })),
+      submissions: this.submissions.map((x) => ({ ...x })),
+      budgetLeft: this.budgetLeft,
+      myPendingLeft: Math.max(0, this.settings.pendingCap - this.pendingCountOf(viewerId)),
+      outcome: this.outcome ? { ...this.outcome } : null,
     };
   }
 }
