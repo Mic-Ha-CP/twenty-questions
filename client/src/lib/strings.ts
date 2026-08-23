@@ -33,13 +33,16 @@ export const ANSWER_ICON: Record<Answer, string> = {
 };
 
 /**
- * 判定记号的 class(DECISIONS #6)。
+ * 判定**图标**的 class(DECISIONS #6 + session 5 修正 2)。
  *
- * 五个是单色 token,**「是也不是」是双色半填充** —— 它没有单一颜色可用,
- * 所以这里给的是 `.judge-both-mark`(定义在 index.css)。
+ * ⚠️ **颜色只给图标,文字一律中性墨色。**
+ * session 5 的 smoke 反馈:整条 chip 连文字一起上色,四五条并排时太闹,
+ * 而判定本来就是图标 + 文字**双编码** —— 颜色的活由图标一个人干就够了。
+ *
+ * 「是也不是」没有单一颜色可用,给的是 `.judge-both-mark`(index.css,绿→红柔和过渡)。
  * 判定按钮组直接吃这张表,不需要判 puzzle type。
  */
-export const ANSWER_MARK_CLASS: Record<Answer, string> = {
+export const ANSWER_ICON_CLASS: Record<Answer, string> = {
   YES: 'text-judge-yes',
   NO: 'text-judge-no',
   IRRELEVANT: 'text-judge-irrelevant',
@@ -114,6 +117,8 @@ const zh: Dict = {
     SUBMISSION_NOT_FOUND: '找不到这条还原',
     NOT_REVEAL_PHASE: '现在不是揭晓阶段',
     ROOM_GONE: '房间已不存在 —— 服务器重启过,这一局没有保存',
+    ROOM_CLOSED_IDLE: '房间已因闲置关闭',
+    ROOM_CLOSED_EMPTY: '房间已关闭 —— 人都走光了',
   },
   ui: {
     'app.title': '海龟汤 · 暗房',
@@ -124,6 +129,7 @@ const zh: Dict = {
     'seat.claim': '我来出题',
     'seat.release': '让出座位',
     'seat.empty': '虚位以待',
+    'seat.youAreOracle': '你是出题人',
     'player.reroll': '换个名字',
     'game.start': '开始',
     'conn.connecting': '连接中…',
@@ -281,6 +287,8 @@ const en: Dict = {
     SUBMISSION_NOT_FOUND: 'Solution not found',
     NOT_REVEAL_PHASE: 'Not in the reveal phase',
     ROOM_GONE: 'That room is gone — the server restarted and rounds are not saved',
+    ROOM_CLOSED_IDLE: 'The room was closed after sitting idle',
+    ROOM_CLOSED_EMPTY: 'The room closed — everyone left',
   },
   ui: {
     'app.title': 'The Dark Room',
@@ -291,6 +299,7 @@ const en: Dict = {
     'seat.claim': 'I will host the puzzle',
     'seat.release': 'Leave the seat',
     'seat.empty': 'Seat open',
+    'seat.youAreOracle': 'You are the oracle',
     'player.reroll': 'New name',
     'game.start': 'Start',
     'conn.connecting': 'Connecting…',

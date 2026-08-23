@@ -145,6 +145,10 @@ export const ERROR_CODES = [
    * **server 从不发这个** —— 它是 client 对完账之后自己用来查文案的 key。
    */
   'ROOM_GONE',
+  /** client 侧:房间被闲置扫描关掉了。和 ROOM_GONE 同一个形状 —— 房没了要有句人话。 */
+  'ROOM_CLOSED_IDLE',
+  /** client 侧:人走光了,房间自然关闭。 */
+  'ROOM_CLOSED_EMPTY',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

@@ -12,6 +12,8 @@
 
 import { PUZZLE_TYPE_IDS } from '@shared/puzzleTypes';
 import { GAME_META } from '@shared/meta';
+import { PlayerTag } from '@/components/player';
+import { RoomHeader, ScreenShell } from '@/components/RoomHeader';
 import { Button, Field, Kicker, Panel, TextInput } from '@/components/ui';
 import { rerollNickname } from '@/lib/nickname';
 import { useIsHost, useIsOracle, useMe, useRoomStore } from '@/store/roomStore';
@@ -45,9 +47,11 @@ export default function Lobby() {
     room.players.every((p) => p.isReady);
 
   return (
-    <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-5 px-6 py-12">
-      {/* ── 房间码 ── */}
-      <Panel className="flex items-center gap-4 p-5">
+    <ScreenShell wide>
+      <RoomHeader compact />
+
+      {/* ── 房间码:lobby 是唯一需要把码放大的地方(要念给朋友听)── */}
+      <Panel className="flex flex-wrap items-center gap-3 p-5">
         <div>
           <Kicker>{t('ui', 'lobby.roomCode')}</Kicker>
           <div className="mt-1 font-mono text-3xl tracking-[0.2em] text-ink">{room.code}</div>
@@ -74,12 +78,7 @@ export default function Lobby() {
         <div className="mt-3 flex items-center gap-3">
           <div className="flex-1 text-sm">
             {oracle ? (
-              <span className="text-ink">
-                {oracle.nickname}
-                {oracle.id === room.viewerId && (
-                  <span className="ml-2 text-xs text-muted">({t('ui', 'lobby.you')})</span>
-                )}
-              </span>
+              <PlayerTag player={oracle} />
             ) : (
               <span className="text-judge-unclear">{t('ui', 'seat.empty')}</span>
             )}
@@ -101,8 +100,8 @@ export default function Lobby() {
             {room.players
               .filter((p) => p.id !== room.oracleId)
               .map((p) => (
-                <Button key={p.id} onClick={() => assignOracle(p.id)}>
-                  {p.nickname}
+                <Button key={p.id} className="px-2.5 py-1 text-xs" onClick={() => assignOracle(p.id)}>
+                  <PlayerTag player={p} showBadge={false} />
                 </Button>
               ))}
             {room.oracleId && <Button onClick={() => assignOracle(null)}>✕</Button>}
@@ -120,16 +119,14 @@ export default function Lobby() {
         </div>
         <ul className="mt-3 divide-y divide-line/60">
           {room.players.map((p) => (
-            <li key={p.id} className="flex items-center gap-2 py-2.5 text-sm">
-              <span className={p.connected ? 'text-ink' : 'text-muted line-through'}>
-                {p.nickname}
+            <li key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2.5 text-sm">
+              {/* 身份三件套统一走 PlayerTag:颜色点 · 名字 · 序号 · 「你」 */}
+              <span className={p.connected ? '' : 'opacity-45 line-through'}>
+                <PlayerTag player={p} />
               </span>
-              {p.id === room.viewerId && (
-                <span className="text-xs text-muted">({t('ui', 'lobby.you')})</span>
-              )}
               {p.isHost && <span className="text-xs text-muted">· {t('ui', 'lobby.host')}</span>}
               {p.id === room.oracleId && (
-                <span className="text-xs text-accent">· {t('ui', 'seat.oracle')}</span>
+                <span className="text-xs text-ctrl">· {t('ui', 'seat.oracle')}</span>
               )}
 
               <span className="ml-auto text-xs">
@@ -235,7 +232,7 @@ export default function Lobby() {
       </Panel>
 
       {/* ── ready / start ── */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Button
           variant={me?.isReady ? 'ghost' : 'solid'}
           onClick={() => setReady(!me?.isReady)}
@@ -258,6 +255,6 @@ export default function Lobby() {
               : t('error', 'NOT_ALL_READY')}
         </p>
       )}
-    </div>
+    </ScreenShell>
   );
 }

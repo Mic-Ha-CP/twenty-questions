@@ -26,10 +26,15 @@
    */
   .judge-both-mark {
     color: theme('colors.judge.both-from');
+    /*
+     * session 5 修正 2:交界改成**柔和过渡**,不再是刀切的 50/50。
+     * 硬边在 12px 的字号上会产生锯齿感,读起来像渲染错误而不是设计。
+     * 38%–62% 之间渐变,两端仍是纯色,「一半是一半不是」的语义没丢。
+     */
     background-image: linear-gradient(
-      90deg,
-      theme('colors.judge.both-from') 0 50%,
-      theme('colors.judge.both-to') 50% 100%
+      100deg,
+      theme('colors.judge.both-from') 0 38%,
+      theme('colors.judge.both-to') 62% 100%
     );
     -webkit-background-clip: text;
     background-clip: text;
@@ -48,9 +53,9 @@
     border-radius: inherit;
     padding: 1px;
     background: linear-gradient(
-      90deg,
-      theme('colors.judge.both-from'),
-      theme('colors.judge.both-to')
+      100deg,
+      theme('colors.judge.both-from') 0 38%,
+      theme('colors.judge.both-to') 62% 100%
     );
     -webkit-mask:
       linear-gradient(#000 0 0) content-box,

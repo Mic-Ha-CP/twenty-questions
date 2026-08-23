@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import { puzzleConfig } from '@shared/puzzleTypes';
 import { PUZZLE_LIMITS } from '@shared/puzzles';
+import { RoomHeader, ScreenShell } from '@/components/RoomHeader';
 import { Button, Difficulty, Field, Kicker, Narrative, Panel, Tag, TextArea, TextInput } from '@/components/ui';
 import { useIsOracle, useRoomStore } from '@/store/roomStore';
 import { useT } from '@/store/langStore';
@@ -43,7 +44,8 @@ function GuesserSetup() {
   const puzzle = room.puzzle;
 
   return (
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center gap-6 px-6 py-16">
+    <ScreenShell>
+      <RoomHeader />
       {puzzle?.surface ? (
         <>
           <SurfacePanel title={puzzle.title} surface={puzzle.surface} />
@@ -57,7 +59,7 @@ function GuesserSetup() {
           </p>
         </div>
       )}
-    </div>
+    </ScreenShell>
   );
 }
 
@@ -70,12 +72,13 @@ function OracleSetup() {
   const hasBank = puzzleConfig(room.settings.puzzleType).hasBank;
 
   return (
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col gap-5 px-6 py-12">
+    <ScreenShell>
+      <RoomHeader />
       <header>
         <Kicker>{t('ui', 'setup.oracleTitle')}</Kicker>
       </header>
       {room.puzzle ? <PuzzleReady hasBank={hasBank} /> : hasBank ? <BankOrOwn /> : <AnswerWord />}
-    </div>
+    </ScreenShell>
   );
 }
 
@@ -101,7 +104,7 @@ function PuzzleReady({ hasBank }: { hasBank: boolean }) {
         </p>
       </Panel>
 
-      <div className="flex gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row">
         <Button onClick={clearPuzzle} className="flex-1">
           {t('ui', 'setup.another')}
         </Button>
@@ -144,10 +147,10 @@ function BankOrOwn() {
             <ul className="divide-y divide-line/60">
               {/* 防剧透:列表只有 title + tags/difficulty —— server 也只发了这些 */}
               {bank.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 px-3 py-3">
+                <li key={p.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-3">
                   <span className="text-sm text-ink">{p.title}</span>
                   <Difficulty level={p.difficulty} />
-                  <span className="flex gap-1.5">
+                  <span className="flex flex-wrap gap-1.5">
                     {p.tags?.map((tag) => (
                       <Tag key={tag}>{tag}</Tag>
                     ))}
@@ -231,7 +234,7 @@ function AnswerWord() {
   return (
     <Panel className="flex flex-col gap-4 p-5">
       <Field label={t('ui', 'setup.answerWord')} hint={`≤ ${PUZZLE_LIMITS.answerWordMax}`}>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <TextInput
             value={word}
             maxLength={PUZZLE_LIMITS.answerWordMax}

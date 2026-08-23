@@ -62,8 +62,10 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
   }
 
   // 通用面 #2:idle sweep 是唯一从外面观察不到的退出路径,必须挂回调。
-  manager.onRoomRemoved((room) => {
-    io.to(roomChannel(room.code)).emit(S2C.ROOM_CLOSED, {});
+  manager.onRoomRemoved((room, reason) => {
+    // 带上原因:client 要能说清「房间已因闲置关闭」,而不是让界面静默退回去。
+    // 和幽灵房间同一个形状 —— 房间没了这件事,永远要有一句人话。
+    io.to(roomChannel(room.code)).emit(S2C.ROOM_CLOSED, { reason });
     lobby.schedule();
   });
   manager.startSweep((room) => commit(room));

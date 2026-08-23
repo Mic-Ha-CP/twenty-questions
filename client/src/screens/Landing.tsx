@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { ScreenShell } from '@/components/RoomHeader';
 import { Button, Kicker, Narrative, Panel, TextInput } from '@/components/ui';
 import { useRoomStore } from '@/store/roomStore';
 import { useT } from '@/store/langStore';
@@ -23,14 +24,21 @@ export default function Landing() {
   const canJoin = /^\d{4}$/.test(code.trim());
 
   return (
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center gap-8 px-6 py-16">
+    <ScreenShell center>
       <header className="text-center">
         <Kicker>{t('ui', 'landing.kicker')}</Kicker>
-        <Narrative className="mt-5 text-3xl">{t('ui', 'landing.tagline')}</Narrative>
+        {/* serif 只给叙事文本 —— 标语是叙事文本。窄屏收一档字号。 */}
+        <Narrative className="mt-5 text-2xl leading-snug sm:text-3xl">
+          {t('ui', 'landing.tagline')}
+        </Narrative>
       </header>
 
       <div className="flex flex-col items-center gap-4">
-        <Button variant="solid" className="px-6 py-3" onClick={() => createRoom(false)}>
+        <Button
+          variant="solid"
+          className="w-full px-6 py-3 sm:w-auto"
+          onClick={() => createRoom(false)}
+        >
           {t('ui', 'lobby.create')}
         </Button>
 
@@ -41,7 +49,7 @@ export default function Landing() {
         </div>
 
         <form
-          className="flex gap-2"
+          className="flex w-full gap-2 sm:w-auto"
           onSubmit={(e) => {
             e.preventDefault();
             if (canJoin) joinRoom(code.trim());
@@ -53,7 +61,7 @@ export default function Landing() {
             maxLength={4}
             placeholder={t('ui', 'landing.codePlaceholder')}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-            className="w-40 text-center font-mono tracking-[0.3em]"
+            className="flex-1 text-center font-mono tracking-[0.3em] sm:w-40 sm:flex-none"
           />
           <Button type="submit" disabled={!canJoin}>
             {t('ui', 'lobby.join')}
@@ -69,7 +77,7 @@ export default function Landing() {
         ) : (
           <ul className="mt-3 flex flex-col divide-y divide-line/60">
             {lobby.map((r) => (
-              <li key={r.code} className="flex items-center gap-3 py-2.5 text-sm">
+              <li key={r.code} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-sm">
                 <span className="font-mono text-muted">#{r.displayNumber}</span>
                 <span className="text-ink">{t('puzzleType', r.puzzleType)}</span>
                 <span className="text-muted">
@@ -78,13 +86,15 @@ export default function Landing() {
                 {!r.hasOracle && (
                   <span className="text-[11px] text-judge-unclear">{t('ui', 'seat.empty')}</span>
                 )}
-                <span className="ml-auto text-muted">{t('phase', r.phase)}</span>
-                <Button onClick={() => joinRoom(r.code)}>{t('ui', 'lobby.joinRow')}</Button>
+                <span className="text-muted">{t('phase', r.phase)}</span>
+                <Button className="ml-auto" onClick={() => joinRoom(r.code)}>
+                  {t('ui', 'lobby.joinRow')}
+                </Button>
               </li>
             ))}
           </ul>
         )}
       </Panel>
-    </div>
+    </ScreenShell>
   );
 }

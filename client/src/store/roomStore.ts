@@ -160,7 +160,15 @@ export function wireRoomSocket(): () => void {
 
   const onLobbyList = (payload: { rooms: RoomSummary[] }) => set({ lobby: payload.rooms });
   const onError = (payload: { code: ErrorCode }) => set({ error: payload.code });
-  const onClosed = () => set({ room: null });
+  /**
+   * 房间关掉了。**和幽灵房间同一个形状**:退回 landing + 一句说得清的话,
+   * 不要让界面静默跳走(session 5 修正 4)。
+   */
+  const onClosed = (payload?: { reason?: string }) => {
+    const notice: ErrorCode =
+      payload?.reason === 'idle' ? 'ROOM_CLOSED_IDLE' : 'ROOM_CLOSED_EMPTY';
+    set({ room: null, error: notice });
+  };
   const onKicked = () => set({ room: null });
   const onSuggestion = (payload: { word: string }) => set({ suggestion: payload.word });
 

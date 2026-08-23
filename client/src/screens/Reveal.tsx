@@ -14,6 +14,8 @@
  */
 
 import type { RoundOutcome } from '@shared/judging';
+import { PlayerTag } from '@/components/player';
+import { RoomHeader, ScreenShell } from '@/components/RoomHeader';
 import { Button, Kicker, Narrative, Panel } from '@/components/ui';
 import { ANSWER_ICON } from '@/lib/strings';
 import { useIsHost, useRoomStore } from '@/store/roomStore';
@@ -27,14 +29,15 @@ export default function Reveal() {
   const outcome = room.outcome;
 
   return (
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center gap-5 px-6 py-12">
+    <ScreenShell>
+      <RoomHeader compact />
       <ResultLine outcome={outcome} />
       <TruthPanel outcome={outcome} />
       <HitDetail outcome={outcome} />
       <NextOracleRow />
 
       {isHost ? (
-        <div className="flex gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
           <Button variant="solid" className="flex-1" onClick={startNextRound}>
             {t('ui', 'reveal.nextRound')}
           </Button>
@@ -45,7 +48,7 @@ export default function Reveal() {
       ) : (
         <p className="text-center text-xs text-muted">{t('ui', 'play.waitingJudge')}</p>
       )}
-    </div>
+    </ScreenShell>
   );
 }
 
@@ -66,9 +69,10 @@ function ResultLine({ outcome }: { outcome: RoundOutcome | null }) {
       </div>
 
       {winner && (
-        <p className="mt-1.5 text-sm text-ink">
-          {t('ui', 'reveal.winner')}:<b className="text-accent">{winner.nickname}</b>
-        </p>
+        <div className="mt-1.5 flex items-center justify-center gap-1.5 text-sm text-ink">
+          <span>{t('ui', 'reveal.winner')}:</span>
+          <PlayerTag player={winner} />
+        </div>
       )}
 
       {/* co-op 是群体胜利 —— 共用几问放在这里,和「谁问出来的」同级,不是个人战绩 */}
@@ -147,7 +151,11 @@ function NextOracleRow() {
       <div className="flex items-baseline justify-between">
         <Kicker>{t('ui', 'reveal.nextOracle')}</Kicker>
         <span className="text-sm text-ink">
-          {next ? next.nickname : <span className="text-judge-unclear">{t('ui', 'seat.empty')}</span>}
+          {next ? (
+            <PlayerTag player={next} />
+          ) : (
+            <span className="text-judge-unclear">{t('ui', 'seat.empty')}</span>
+          )}
         </span>
       </div>
 
@@ -158,7 +166,7 @@ function NextOracleRow() {
             .filter((p) => p.id !== room.nextOracleId)
             .map((p) => (
               <Button key={p.id} className="px-2.5 py-1 text-xs" onClick={() => setNextOracle(p.id)}>
-                {p.nickname}
+                <PlayerTag player={p} showBadge={false} />
               </Button>
             ))}
           {room.nextOracleId !== null && (

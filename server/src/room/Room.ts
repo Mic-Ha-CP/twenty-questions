@@ -111,6 +111,8 @@ export class Room {
   /** 本局开始计时的锚点,用来算 durationMs。 */
   private playingStartedAt = 0;
   private seq = 0;
+  /** 入房序号发号器。**只增不回收** —— 见 Player.seatNo 的注释。 */
+  private seatSeq = 0;
 
   private readonly bank: BankPort;
 
@@ -135,6 +137,7 @@ export class Room {
       isReady: false,
       connected: true,
       disconnectedAt: null,
+      seatNo: ++this.seatSeq,
     });
   }
 
@@ -190,6 +193,7 @@ export class Room {
       isReady: false,
       connected: true,
       disconnectedAt: null,
+      seatNo: ++this.seatSeq, // 只增不回收
     };
     if (player.isHost) this.hostId = id;
     this.players.push(player);
