@@ -8,6 +8,11 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# ── pm2 的实际启动配置(VPS 上由 .example 拷贝而来)──
+# 它在 VPS 上会被就地编辑(cutover 时改 CLIENT_ORIGIN),
+# 进了 git 的话每次 `git pull` 都要处理冲突。模板留在 .example.cjs。
+server/ecosystem.config.cjs
+
 # ── env:密钥与跨 repo URL 永不进 git(CONVENTIONS.md)──
 # v1 没有任何 API key;这里挡的是 CLIENT_ORIGIN / VITE_SERVER_URL 之类的本地覆盖。
 .env

@@ -1,12 +1,18 @@
 // CONVENTIONS.md 要的是「typecheck + lint」。typecheck 由 tsc 管,这里只管 lint。
 // 刻意保持薄:这个 tier 不需要一套风格警察,只需要挡住真会咬人的几类写法。
 import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   { ignores: ['node_modules/**', 'dist/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // pm2 的 ecosystem 必须是 CommonJS(`.cjs`,gotcha 5),所以它需要 node globals。
+    files: ['**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs', globals: globals.node },
+  },
   {
     files: ['**/*.ts'],
     rules: {
