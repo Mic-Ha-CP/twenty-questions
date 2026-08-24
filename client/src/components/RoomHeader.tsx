@@ -9,6 +9,12 @@
  */
 
 import { PlayerStrip } from '@/components/player';
+import {
+  HostOfflineBanner,
+  HostTransferNotice,
+  LangToggle,
+  LeaveRoomButton,
+} from '@/components/RoomControls';
 import { useRoomStore } from '@/store/roomStore';
 import { useT } from '@/store/langStore';
 
@@ -23,8 +29,11 @@ export function RoomHeader({ compact = false }: { compact?: boolean }) {
         <span className="font-mono text-sm tracking-[0.18em] text-ctrl">{room.code}</span>
         <span className="text-xs text-muted">{t('puzzleType', room.settings.puzzleType)}</span>
         {isOracle && <span className="text-xs text-ctrl">· {t('ui', 'seat.youAreOracle')}</span>}
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-2">
           <BudgetPill />
+          {/* 常驻:每一屏都能离开、每一屏都能切语言 */}
+          <LeaveRoomButton />
+          <LangToggle />
         </span>
       </div>
       {!compact && (
@@ -32,6 +41,10 @@ export function RoomHeader({ compact = false }: { compact?: boolean }) {
           <PlayerStrip />
         </div>
       )}
+      <div className="mt-2 flex flex-col gap-1.5 empty:mt-0">
+        <HostOfflineBanner />
+        <HostTransferNotice />
+      </div>
     </header>
   );
 }

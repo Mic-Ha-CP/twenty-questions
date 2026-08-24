@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { seatBadge, seatColor, shouldShowTruthPanel } from './seats';
+import { seatBadge, seatColor, shouldShowTransferControl, shouldShowTruthPanel } from './seats';
 
 describe('座位色:确定性与唯一性', () => {
   it('同一个号永远同一个色 —— 每个 client 算出来都一样', () => {
@@ -95,5 +95,25 @@ describe('真相面板:只在 oracle 那一侧渲染', () => {
     const afterOld = { oracleId: 'new', viewerId: 'old', oracleTruth: null };
     expect(shouldShowTruthPanel(afterNew)).toBe(true);
     expect(shouldShowTruthPanel(afterOld)).toBe(false);
+  });
+});
+
+describe('转移出题人入口的显隐(smoke 第三轮修正 3)', () => {
+  it('host + 人够 → 出现', () => {
+    expect(shouldShowTransferControl({ isHost: true, canTransferOracle: true })).toBe(true);
+  });
+
+  it('**2 人房中段整块隐藏** —— 只剩「公开汤底 · 结束本局」', () => {
+    expect(shouldShowTransferControl({ isHost: true, canTransferOracle: false })).toBe(false);
+  });
+
+  it('非 host 永远看不到', () => {
+    expect(shouldShowTransferControl({ isHost: false, canTransferOracle: true })).toBe(false);
+    expect(shouldShowTransferControl({ isHost: false, canTransferOracle: false })).toBe(false);
+  });
+
+  it('**规则来自 server 投影,不是 client 数人头** —— 这里没有 players.length', () => {
+    // 这条断言的意义是提醒:要加人数逻辑就去 Room.canTransferOracle 改,别在这儿加。
+    expect(shouldShowTransferControl.length).toBe(1);
   });
 });

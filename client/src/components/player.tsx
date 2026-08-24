@@ -74,14 +74,16 @@ export function PlayerStrip() {
       {room.players.map((p) => (
         <span
           key={p.id}
-          className={`inline-flex items-center gap-1.5 text-xs ${p.connected ? '' : 'opacity-45'}`}
-          title={p.connected ? undefined : t('ui', 'conn.offline')}
+          className={`inline-flex items-center gap-1.5 text-xs ${p.connected ? '' : 'opacity-55'}`}
         >
           <SeatDot seatNo={p.seatNo} size={7} />
           <span className={p.id === room.viewerId ? 'text-ink' : 'text-muted'}>{p.nickname}</span>
           <span className="font-mono text-[10px] text-muted/70">{seatBadge(p.seatNo)}</span>
           {p.id === room.oracleId && (
             <span className="text-[10px] text-ctrl">{t('ui', 'seat.oracle')}</span>
+          )}
+          {!p.connected && (
+            <span className="text-[10px] text-judge-unclear">{t('ui', 'player.offline')}</span>
           )}
         </span>
       ))}

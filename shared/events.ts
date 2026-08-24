@@ -80,6 +80,11 @@ export const S2C = {
    * payload 只带语义:{ from, to }(playerId,不带昵称)。
    */
   ORACLE_TRANSFERRED: 's:oracle_transferred',
+  /**
+   * 房主换人了。**独立事件** —— 显式转让、host 离开、宽限到期被扫走,三条路都发。
+   * 桌上的人需要知道现在谁能开下一局。payload 只带语义:{ from, to }。
+   */
+  HOST_TRANSFERRED: 's:host_transferred',
   /** 所有拒绝走这一条。payload = { code: ErrorCode }。**不带中文。** */
   ERROR: 's:error',
 } as const;
@@ -140,6 +145,8 @@ export const ERROR_CODES = [
   'SUBMISSION_PENDING',
   'SUBMISSION_NOT_FOUND',
   'NOT_REVEAL_PHASE',
+  /** 中段转移出题人:人不够(2 人房换完就没有干净的猜题人了)。 */
+  'TOO_FEW_FOR_TRANSFER',
   /**
    * client 侧专用:认领成功,但它记着的房间已经不在了(server 重启)。
    * **server 从不发这个** —— 它是 client 对完账之后自己用来查文案的 key。

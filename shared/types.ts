@@ -158,4 +158,9 @@ export interface RoomState {
    * **全房可见** —— 交接结果不该只有 host 知道。非 reveal 期间为 null。
    */
   nextOracleId: PlayerId | null;
+  /**
+   * 现在能不能转移出题人(SPEC §7 接管的人数 gate)。
+   * **UI 藏按钮读的就是这个** —— 和 server 的判定同源,两边各写一份迟早会漂。
+   */
+  canTransferOracle: boolean;
 }

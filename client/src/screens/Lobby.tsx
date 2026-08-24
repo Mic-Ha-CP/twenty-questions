@@ -36,7 +36,6 @@ export default function Lobby() {
     releaseOracle,
     assignOracle,
     startGame,
-    leaveRoom,
   } = useRoomStore();
   const [copied, setCopied] = useState(false);
 
@@ -66,9 +65,6 @@ export default function Lobby() {
           }}
         >
           {copied ? t('ui', 'lobby.copied') : t('ui', 'lobby.copy')}
-        </Button>
-        <Button variant="danger" onClick={leaveRoom}>
-          {t('ui', 'lobby.leave')}
         </Button>
       </Panel>
 
@@ -121,9 +117,13 @@ export default function Lobby() {
           {room.players.map((p) => (
             <li key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2.5 text-sm">
               {/* 身份三件套统一走 PlayerTag:颜色点 · 名字 · 序号 · 「你」 */}
-              <span className={p.connected ? '' : 'opacity-45 line-through'}>
+              <span className={p.connected ? '' : 'opacity-45'}>
                 <PlayerTag player={p} />
               </span>
+              {/* 离线徽章:和 PlayerStrip 的处理一致,各屏看到的是同一件事 */}
+              {!p.connected && (
+                <span className="text-[10px] text-judge-unclear">{t('ui', 'player.offline')}</span>
+              )}
               {p.isHost && <span className="text-xs text-muted">· {t('ui', 'lobby.host')}</span>}
               {p.id === room.oracleId && (
                 <span className="text-xs text-ctrl">· {t('ui', 'seat.oracle')}</span>

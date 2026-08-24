@@ -39,11 +39,14 @@ interface RoomStore {
   correction: { questionId: string; from: Answer | null; to: Answer | null } | null;
   /** 出题人刚刚被转移(SPEC §7 接管)。局中换判定的人要看得见。 */
   oracleTransfer: { from: string | null; to: string | null } | null;
+  /** 房主刚刚换人 —— 显式转让 / 离开 / 宽限到期,三条路都会到这里。 */
+  hostTransfer: { from: string | null; to: string | null } | null;
 
   clearError: () => void;
   clearSuggestion: () => void;
   clearCorrection: () => void;
   clearOracleTransfer: () => void;
+  clearHostTransfer: () => void;
 
   /* — actions:只 emit,不改本地状态 — */
   subscribeLobby: () => void;
@@ -96,11 +99,13 @@ export const useRoomStore = create<RoomStore>((set) => ({
   suggestion: null,
   correction: null,
   oracleTransfer: null,
+  hostTransfer: null,
 
   clearError: () => set({ error: null }),
   clearSuggestion: () => set({ suggestion: null }),
   clearCorrection: () => set({ correction: null }),
   clearOracleTransfer: () => set({ oracleTransfer: null }),
+  clearHostTransfer: () => set({ hostTransfer: null }),
 
   subscribeLobby: () => emit(C2S.LOBBY_SUBSCRIBE),
   createRoom: (isPrivate) => emit(C2S.CREATE_ROOM, { isPrivate }),
@@ -188,6 +193,8 @@ export function wireRoomSocket(): () => void {
 
   const onOracleTransferred = (payload: { from: string | null; to: string | null }) =>
     set({ oracleTransfer: payload });
+  const onHostTransferred = (payload: { from: string | null; to: string | null }) =>
+    set({ hostTransfer: payload });
   const onCorrected = (payload: {
     questionId: string;
     from: Answer | null;
@@ -205,6 +212,7 @@ export function wireRoomSocket(): () => void {
   s.on(S2C.JUDGEMENT_CORRECTED, onCorrected);
   s.on(S2C.HELLO_OK, onHelloOk);
   s.on(S2C.ORACLE_TRANSFERRED, onOracleTransferred);
+  s.on(S2C.HOST_TRANSFERRED, onHostTransferred);
   if (s.connected) set({ conn: 'online' });
 
   return () => {
@@ -221,6 +229,7 @@ export function wireRoomSocket(): () => void {
     s.off(S2C.JUDGEMENT_CORRECTED, onCorrected);
     s.off(S2C.HELLO_OK, onHelloOk);
     s.off(S2C.ORACLE_TRANSFERRED, onOracleTransferred);
+    s.off(S2C.HOST_TRANSFERRED, onHostTransferred);
   };
 }
 

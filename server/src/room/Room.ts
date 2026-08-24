@@ -413,10 +413,24 @@ export class Room {
    */
   assignOracle(requesterId: PlayerId, targetId: PlayerId | null, now: number): Result<void> {
     if (!this.isHost(requesterId)) return err('NOT_HOST');
+    // 中段的人数 gate —— UI 藏按钮不算数,server 也得挡(见 canTransferOracle)。
+    if (this.phase !== 'lobby' && !this.canTransferOracle()) return err('TOO_FEW_FOR_TRANSFER');
     if (targetId !== null && !this.has(targetId)) return err('PLAYER_NOT_FOUND');
     this.oracleId = targetId;
     this.touch(now);
     return OK;
+  }
+
+  /**
+   * 中段还能不能转移出题人。**UI 藏按钮和 server 判定读同一条规则** ——
+   * 两边各写一份迟早会漂。
+   *
+   * lobby 阶段永远可以(还没人知道任何东西);中段要求房内 ≥3 人,
+   * 否则换完之后场上唯一的猜题人就是刚放下汤底的前任。
+   */
+  canTransferOracle(): boolean {
+    if (this.phase === 'lobby') return true;
+    return this.players.length >= GAME_META.minPlayersForMidGameTransfer;
   }
 
   /**
@@ -888,6 +902,7 @@ export class Room {
       outcome: this.outcome ? { ...this.outcome } : null,
       /** 下一局谁出题 —— 全房可见,大家都该看到交接结果。 */
       nextOracleId: this.nextOracleId,
+      canTransferOracle: this.canTransferOracle(),
     };
   }
 }

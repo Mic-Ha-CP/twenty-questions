@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { LangToggle } from '@/components/RoomControls';
 import { ScreenShell } from '@/components/RoomHeader';
 import { Button, Kicker, Narrative, Panel, TextInput } from '@/components/ui';
 import { useRoomStore } from '@/store/roomStore';
@@ -25,6 +26,10 @@ export default function Landing() {
 
   return (
     <ScreenShell center>
+      {/* Landing 没有 RoomHeader,单独给语言切换留一行 —— 它不再是右下角浮标 */}
+      <div className="flex justify-end">
+        <LangToggle />
+      </div>
       <header className="text-center">
         <Kicker>{t('ui', 'landing.kicker')}</Kicker>
         {/* serif 只给叙事文本 —— 标语是叙事文本。窄屏收一档字号。 */}

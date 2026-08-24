@@ -116,6 +116,7 @@ const zh: Dict = {
     SUBMISSION_PENDING: '你已经有一条还原在等回复',
     SUBMISSION_NOT_FOUND: '找不到这条还原',
     NOT_REVEAL_PHASE: '现在不是揭晓阶段',
+    TOO_FEW_FOR_TRANSFER: '人太少,现在不能转移出题人',
     ROOM_GONE: '房间已不存在 —— 服务器重启过,这一局没有保存',
     ROOM_CLOSED_IDLE: '房间已因闲置关闭',
     ROOM_CLOSED_EMPTY: '房间已关闭 —— 人都走光了',
@@ -228,6 +229,23 @@ const zh: Dict = {
     'reveal.noOracle': '暂不指定',
     'oracle.transferred': '出题人已转移',
     'oracle.transferTo': '转移出题人',
+    'oracle.transferConfirm': '转移后 {name} 将立即看到汤底并接手判定;你将变为猜题者,且你已知道答案。',
+    'oracle.transferConfirmYes': '确认转移',
+    'oracle.transferTooFew': '人太少,转移之后就没有还没看过汤底的猜题人了',
+
+    'room.leave': '离开房间',
+    'room.leaveConfirm': '确定要离开这个房间吗?',
+    'room.leaveConfirmOracle': '你是出题人。离开之后座位会空出来,由房主指派新的出题人接手 —— 题目不会丢。',
+    'room.leaveConfirmPlaying': '这一局还在进行中。离开之后你就不在这一局里了。',
+    'room.leaveYes': '离开',
+
+    'host.offline': '房主已离线,若未归将自动移交',
+    'host.transferred': '房主已移交给 {name}',
+    'player.offline': '离线',
+    'lang.toZh': '中文',
+    'lang.toEn': 'EN',
+
+    'reveal.waitingHost': '等房主开始下一局',
   },
 };
 
@@ -286,6 +304,7 @@ const en: Dict = {
     SUBMISSION_PENDING: 'You already have a solution awaiting a reply',
     SUBMISSION_NOT_FOUND: 'Solution not found',
     NOT_REVEAL_PHASE: 'Not in the reveal phase',
+    TOO_FEW_FOR_TRANSFER: 'Too few players to hand over the oracle seat right now',
     ROOM_GONE: 'That room is gone — the server restarted and rounds are not saved',
     ROOM_CLOSED_IDLE: 'The room was closed after sitting idle',
     ROOM_CLOSED_EMPTY: 'The room closed — everyone left',
@@ -398,6 +417,23 @@ const en: Dict = {
     'reveal.noOracle': 'Leave it open',
     'oracle.transferred': 'The oracle seat changed hands',
     'oracle.transferTo': 'Hand the seat to',
+    'oracle.transferConfirm': 'After this, {name} sees the truth immediately and takes over judging. You become a guesser — one who already knows the answer.',
+    'oracle.transferConfirmYes': 'Hand it over',
+    'oracle.transferTooFew': 'Too few players — nobody would be left who has not seen the truth',
+
+    'room.leave': 'Leave room',
+    'room.leaveConfirm': 'Leave this room?',
+    'room.leaveConfirmOracle': 'You are the oracle. The seat opens up and the host picks someone to take over — the puzzle is not lost.',
+    'room.leaveConfirmPlaying': 'This round is still running. You will not be in it any more.',
+    'room.leaveYes': 'Leave',
+
+    'host.offline': 'The host is offline — the room will hand over if they do not return',
+    'host.transferred': 'Host handed over to {name}',
+    'player.offline': 'offline',
+    'lang.toZh': '中文',
+    'lang.toEn': 'EN',
+
+    'reveal.waitingHost': 'Waiting for the host to start the next round',
   },
 };
 
@@ -407,6 +443,11 @@ const DICTS: Record<Lang, Dict> = { zh, en };
  * `t('ui', 'lobby.create')` / `t('error', code)` / `t('answer', 'YES')`。
  * 分组取值,所以漏 key 在类型层就被抓住。
  */
+/** 把 `{name}` 之类的占位换掉。字典里只留模板,拼装在调用点。 */
+export function fill(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => vars[key] ?? whole);
+}
+
 export function translate<K extends keyof Dict>(
   lang: Lang,
   group: K,

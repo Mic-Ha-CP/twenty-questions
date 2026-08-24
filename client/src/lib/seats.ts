@@ -65,3 +65,24 @@ export interface TruthPanelSource {
 export function shouldShowTruthPanel(room: TruthPanelSource): boolean {
   return room.oracleId === room.viewerId && !!room.oracleTruth;
 }
+
+/* ─────────────────── 转移出题人入口的显隐 ─────────────────── */
+
+/**
+ * 中段转移入口要不要出现。
+ *
+ * **判定依据是 server 投影里的 `canTransferOracle`,不是 client 自己数人头** ——
+ * 两边各写一份人数规则,迟早会漂(server 那条在 `Room.canTransferOracle`)。
+ * 2 人房中段:整块隐藏,只剩「公开汤底 · 结束本局」那条出路。
+ */
+export interface TransferControlSource {
+  isHost: boolean;
+  canTransferOracle: boolean;
+}
+
+export function shouldShowTransferControl({
+  isHost,
+  canTransferOracle,
+}: TransferControlSource): boolean {
+  return isHost && canTransferOracle;
+}

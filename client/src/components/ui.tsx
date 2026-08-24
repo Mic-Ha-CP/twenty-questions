@@ -8,6 +8,24 @@
  */
 
 import type { ButtonHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
+import { createPortal } from 'react-dom';
+
+/**
+ * 模态框。**必须走 portal 挂到 body 上。**
+ *
+ * 踩过一次:确认框直接写在 `RoomHeader` 里,而 header 有 `backdrop-blur` ——
+ * `backdrop-filter` 会给 fixed 定位的后代造一个新的**包含块**,于是
+ * `fixed inset-0` 不再相对视口,弹窗被压在顶栏那一小条里、上半截还被裁掉。
+ * 挂到 body 就没有这个问题,顺便也不受任何祖先 overflow / transform 影响。
+ */
+export function Modal({ children }: { children: ReactNode }) {
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 px-4">
+      {children}
+    </div>,
+    document.body,
+  );
+}
 
 export function Panel({
   children,

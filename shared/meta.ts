@@ -10,6 +10,14 @@ export const GAME_META = {
 
   /** co-op 下限:1 oracle + ≥1 guesser(SPEC §3 start gate)。 */
   minPlayers: 2,
+  /**
+   * **中段转移出题人的人数下限。**
+   *
+   * 2 人房里转移是死路:换完之后场上唯一的猜题人,就是刚刚还拿着汤底的那个人。
+   * 所以中段(非 lobby)转移要求房内 ≥3 人 —— 保证换完至少还剩一个
+   * 没碰过汤底的猜题人。2 人房中段只剩「公开汤底 · 结束本局」这一条出路。
+   */
+  minPlayersForMidGameTransfer: 3,
   /** 房间容量默认值;host 可在 lobby 调,钳在 [minPlayers, maxPlayersLimit]。 */
   defaultMaxPlayers: 8,
   maxPlayersLimit: 12,

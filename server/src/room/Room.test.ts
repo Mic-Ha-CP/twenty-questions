@@ -128,10 +128,11 @@ describe('oracle 座位:先到先得(必测 7)', () => {
    * 不是实现漂移,是那个约束到期了。中段接管的完整用例在 `handoff.test.ts`。
    */
   it('assignOracle 中段也放行 —— SPEC §7 的 oracle 接管', () => {
-    const r = roomWith(1);
+    // 3 人:session 5.5 起中段转移有人数 gate(2 人房换完就没有干净的猜题人了),
+    // 完整的 gate 用例在 resilience.test.ts。
+    const r = roomWith(2);
     r.claimOracle('p0', T0);
-    r.setReady('host', true, T0);
-    r.setReady('p0', true, T0);
+    for (const id of ['host', 'p0', 'p1']) r.setReady(id, true, T0);
     r.startGame('host', T0);
     expect(r.phase).toBe('setup');
     expect(r.assignOracle('host', 'host', T0).ok).toBe(true);

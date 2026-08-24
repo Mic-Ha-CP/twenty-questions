@@ -37,6 +37,13 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
   /** playerId → socket。per-viewer 投影要按人发,不能用频道广播一把梭。 */
   const sockets = new Map<PlayerId, Socket>();
 
+  /**
+   * 每个房间上次广播时的 host。
+   * host 会经由三条路换人:显式转让 / host 主动离开 / 宽限到期被扫走。
+   * 与其在三处各写一遍广播,不如在 **choke point** 上比一次 —— 一条都漏不掉。
+   */
+  const lastHost = new Map<string, PlayerId>();
+
   const lobby = new LobbyBroadcaster<RoomSummary>(
     () => buildLobbyList(manager),
     (rooms) => io.to(LOBBY_CHANNEL).emit(S2C.LOBBY_LIST, { rooms }),
@@ -49,6 +56,16 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
    * 覆盖 join / leave / kick / ready / settings / 座位 / phase / 断线。
    */
   function commit(room: Room): void {
+    const previous = lastHost.get(room.code);
+    if (previous !== undefined && previous !== room.hostId) {
+      // 房主换人是件大事:决定谁能开下一局 / 回大厅。别让它埋在 room_state 差异里。
+      io.to(roomChannel(room.code)).emit(S2C.HOST_TRANSFERRED, {
+        from: previous,
+        to: room.hostId,
+      });
+    }
+    lastHost.set(room.code, room.hostId);
+
     broadcastRoomState(room);
     lobby.schedule();
   }
@@ -63,6 +80,7 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
 
   // 通用面 #2:idle sweep 是唯一从外面观察不到的退出路径,必须挂回调。
   manager.onRoomRemoved((room, reason) => {
+    lastHost.delete(room.code);
     // 带上原因:client 要能说清「房间已因闲置关闭」,而不是让界面静默退回去。
     // 和幽灵房间同一个形状 —— 房间没了这件事,永远要有一句人话。
     io.to(roomChannel(room.code)).emit(S2C.ROOM_CLOSED, { reason });

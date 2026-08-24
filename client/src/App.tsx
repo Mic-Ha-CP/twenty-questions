@@ -16,12 +16,11 @@ import Lobby from '@/screens/Lobby';
 import Playing from '@/screens/Playing';
 import Reveal from '@/screens/Reveal';
 import Setup from '@/screens/Setup';
-import { useLangStore, useT } from '@/store/langStore';
+import { useT } from '@/store/langStore';
 import { useRoomStore, wireRoomSocket } from '@/store/roomStore';
 
 export default function App() {
   const t = useT();
-  const { lang, setLang } = useLangStore();
   const { conn, ready, room, error, clearError } = useRoomStore();
 
   useEffect(() => wireRoomSocket(), []);
@@ -55,13 +54,6 @@ export default function App() {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-        className="fixed bottom-4 right-4 rounded border border-line px-2.5 py-1 text-[11px] text-muted hover:border-ctrl hover:text-ink"
-      >
-        {lang === 'zh' ? 'EN' : '中文'}
-      </button>
     </div>
   );
 }

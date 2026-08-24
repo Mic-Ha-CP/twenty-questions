@@ -19,6 +19,7 @@ import { JUDGING_LIMITS } from '@shared/judging';
 import { puzzleConfig, type Answer } from '@shared/puzzleTypes';
 import { PlayerTag, PlayerTagById, SeatDot } from '@/components/player';
 import { RoomHeader, ScreenShell } from '@/components/RoomHeader';
+import { TransferOracleControl } from '@/components/RoomControls';
 import { Button, Kicker, Narrative, Panel, TextArea, TextInput } from '@/components/ui';
 import { shouldShowTruthPanel } from '@/lib/seats';
 import { ANSWER_ICON, ANSWER_ICON_CLASS } from '@/lib/strings';
@@ -486,53 +487,14 @@ function Submissions() {
 function FooterControls() {
   const isOracle = useIsOracle();
   const isHost = useIsHost();
+  // 两个入口都没有的人(普通猜题人)不渲染这条 —— 别留一条空的分隔线
   if (!isOracle && !isHost) return null;
 
   return (
     <div className="mt-2 flex flex-wrap items-center justify-center gap-3 border-t border-line/50 pt-4">
-      {isHost && <TransferOracle />}
+      <TransferOracleControl />
       {isOracle && <RevealTruthButton />}
     </div>
-  );
-}
-
-/** host 的中段接管入口(SPEC §7):换人不换题,牌局状态一概不动。 */
-function TransferOracle() {
-  const t = useT();
-  const room = useRoomStore((s) => s.room)!;
-  const { assignOracle } = useRoomStore();
-  const [open, setOpen] = useState(false);
-
-  if (!open) {
-    return (
-      <Button className="px-2.5 py-1 text-xs" onClick={() => setOpen(true)}>
-        {t('ui', 'oracle.transferTo')}
-      </Button>
-    );
-  }
-  return (
-    <Panel className="w-full p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted">{t('ui', 'oracle.transferTo')}</span>
-        {room.players
-          .filter((p) => p.id !== room.oracleId)
-          .map((p) => (
-            <Button
-              key={p.id}
-              className="px-2.5 py-1 text-xs"
-              onClick={() => {
-                assignOracle(p.id);
-                setOpen(false);
-              }}
-            >
-              <PlayerTag player={p} showBadge={false} />
-            </Button>
-          ))}
-        <Button className="ml-auto px-2.5 py-1 text-xs" onClick={() => setOpen(false)}>
-          {t('ui', 'play.cancel')}
-        </Button>
-      </div>
-    </Panel>
   );
 }
 

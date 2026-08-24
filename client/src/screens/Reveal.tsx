@@ -46,7 +46,8 @@ export default function Reveal() {
           </Button>
         </div>
       ) : (
-        <p className="text-center text-xs text-muted">{t('ui', 'play.waitingJudge')}</p>
+        // 语义错层修正:这一屏等的是**房主开下一局**,不是出题人判定
+        <p className="text-center text-xs text-muted">{t('ui', 'reveal.waitingHost')}</p>
       )}
     </ScreenShell>
   );
