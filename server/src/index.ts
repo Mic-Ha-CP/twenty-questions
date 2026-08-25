@@ -17,6 +17,7 @@ import cors from 'cors';
 import express from 'express';
 import { Server } from 'socket.io';
 import { GAME_META } from '@shared/meta';
+import { guardrailsFromEnv } from './net/guardrails';
 import { attachSocketLayer } from './socket/index';
 
 const PORT = Number(process.env.PORT ?? 3002);
@@ -64,13 +65,35 @@ if (IS_PRODUCTION && !rawOrigin) {
 
 const { origins: CLIENT_ORIGIN, normalised } = parseOrigins(rawOrigin || 'http://localhost:5173');
 
+const LIMITS = guardrailsFromEnv();
+
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: CLIENT_ORIGIN } });
-const socketLayer = attachSocketLayer(io);
+const io = new Server(server, {
+  cors: { origin: CLIENT_ORIGIN },
+  /**
+   * 默认 1MB 压到 64KB。最大的合法 payload 是一段还原叙述(600 字),
+   * 离 64KB 远得很 —— 剩下的空间只对想塞垃圾的人有用。
+   */
+  maxHttpBufferSize: LIMITS.maxPayloadBytes,
+});
+
+/**
+ * ⚠️ **Origin 检查只在生产启用。**
+ * dev 里不启用:本地会用各种 origin 试(dev server、局域网 IP、smoke 脚本),
+ * 全挡掉只会挡住自己。
+ *
+ * 另外它**不是访问控制** —— 浏览器伪造不了 Origin,所以挡得住「别人的网站」;
+ * 脚本想写什么写什么,挡不住,而且没有应用层办法挡得住。详见 net/guardrails.ts。
+ */
+const socketLayer = attachSocketLayer(io, {
+  allowedOrigins: CLIENT_ORIGIN,
+  enforceOrigin: IS_PRODUCTION,
+  guardrails: LIMITS,
+});
 
 /**
  * 健康检查。配方全程拿它当探针,所以形状要稳:**`ok` 永远在,永远是布尔**。
@@ -103,6 +126,13 @@ server.listen(PORT, () => {
   if (!IS_PRODUCTION && !rawOrigin) {
     console.log(`[${GAME_META.gameId}] (dev default origin; set CLIENT_ORIGIN for anything else)`);
   }
+  // 把生效中的护栏打出来 —— 线上调阈值时能一眼确认改到没有
+  console.log(
+    `[${GAME_META.gameId}] guardrails: originCheck=${IS_PRODUCTION ? 'on' : 'off (dev)'} ` +
+      `maxConnPerIp=${LIMITS.maxConnectionsPerIp} ` +
+      `rate=${LIMITS.eventRatePerSec}/s (judge ${LIMITS.judgeRatePerSec}/s, burst ${LIMITS.burst}) ` +
+      `maxPayload=${LIMITS.maxPayloadBytes}B`,
+  );
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

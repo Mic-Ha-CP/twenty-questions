@@ -16,6 +16,15 @@ import { normalizeDisplayName } from '@shared/names';
 import type { Answer } from '@shared/puzzleTypes';
 import type { PlayerId, RoomSettings, RoomSummary } from '@shared/types';
 import { findPuzzle, listAvailable, suggestAnswerWord } from '../game/puzzleBank';
+import {
+  ConnectionCounter,
+  TokenBucket,
+  checkOrigin,
+  clientIpOf,
+  guardrailsFromEnv,
+  isJudgeEvent,
+  type GuardrailConfig,
+} from '../net/guardrails';
 import { LobbyBroadcaster } from '../room/LobbyBroadcaster';
 import type { BankPort, Room } from '../room/Room';
 import { RoomManager } from '../room/RoomManager';
@@ -26,13 +35,32 @@ const roomChannel = (code: string) => `room:${code}`;
 interface SocketData {
   playerId?: PlayerId;
   nickname?: string;
+  /** 连接时算出来的客户端 IP,断开时用它归还名额。 */
+  ip?: string;
 }
 
 /** 题库端口的真实实现 —— 唯一把 data/ 接进 Room 的地方。 */
 const BANK: BankPort = { list: listAvailable, find: findPuzzle };
 
-export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: () => void } {
+export interface SocketLayerOptions {
+  /** 允许的前端 origin(已归一化,无末尾斜杠)。 */
+  allowedOrigins?: readonly string[];
+  /** 是否真的按 Origin 拒连 —— 只在生产启用(dev 里会挡掉本地各种试验)。 */
+  enforceOrigin?: boolean;
+  guardrails?: GuardrailConfig;
+}
+
+export function attachSocketLayer(
+  io: Server,
+  options: SocketLayerOptions = {},
+): { manager: RoomManager; dispose: () => void } {
   const manager = new RoomManager(() => Date.now(), BANK);
+
+  const allowedOrigins = options.allowedOrigins ?? [];
+  const enforceOrigin = options.enforceOrigin ?? false;
+  const limits = options.guardrails ?? guardrailsFromEnv();
+  /** per-IP 并发连接数。IP 取自 X-Forwarded-For —— Caddy 后面 address 全是网关。 */
+  const connections = new ConnectionCounter(limits.maxConnectionsPerIp);
 
   /** playerId → socket。per-viewer 投影要按人发,不能用频道广播一把梭。 */
   const sockets = new Map<PlayerId, Socket>();
@@ -88,10 +116,49 @@ export function attachSocketLayer(io: Server): { manager: RoomManager; dispose: 
   });
   manager.startSweep((room) => commit(room));
 
+  /* ═══════════════ 连接前的两道闸(护栏,不是访问控制)═══════════════ */
+
+  io.use((socket, next) => {
+    /*
+     * 闸 1:Origin。**浏览器不能伪造它**,所以「别人的网站借我们后端」挡得住;
+     * 脚本挡不住(它想写什么写什么),我们知道并接受 —— 见 net/guardrails.ts 顶部。
+     */
+    const verdict = checkOrigin(socket.handshake.headers.origin, allowedOrigins, enforceOrigin);
+    if (!verdict.allowed) return next(new Error('origin_not_allowed'));
+
+    // 闸 2:per-IP 并发连接数。随机扫描器保险。
+    const ip = clientIpOf(socket.handshake);
+    if (!connections.tryAdd(ip)) return next(new Error('too_many_connections'));
+
+    (socket.data as SocketData).ip = ip;
+    next();
+  });
+
   /* ═══════════════════════ connection ═══════════════════════ */
 
   io.on('connection', (socket: Socket) => {
     const data = socket.data as SocketData;
+
+    // 名额在断开时归还 —— 放在最前面注册,保证任何退出路径都还得掉
+    socket.on('disconnect', () => {
+      if (data.ip) connections.release(data.ip);
+    });
+
+    /*
+     * 闸 3:per-socket 事件速率。**超限丢掉这一条 + 回错误码,不断开连接** ——
+     * 手抖点快了不该把人踢下线。判定类走更宽的桶(oracle 清队列会连点)。
+     */
+    const general = new TokenBucket(limits.eventRatePerSec, limits.burst, Date.now());
+    const judging = new TokenBucket(limits.judgeRatePerSec, limits.burst, Date.now());
+    socket.use((packet, next) => {
+      const event = String(packet[0] ?? '');
+      const bucket = isJudgeEvent(event) ? judging : general;
+      if (!bucket.tryTake(Date.now())) {
+        socket.emit(S2C.ERROR, { code: 'RATE_LIMITED' });
+        return; // 不调 next() = 丢掉这一条,但连接留着
+      }
+      next();
+    });
 
     const fail = (code: ErrorCode) => socket.emit(S2C.ERROR, { code });
 

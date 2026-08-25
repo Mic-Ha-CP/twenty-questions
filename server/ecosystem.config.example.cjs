@@ -47,6 +47,22 @@ module.exports = {
          * 想同时放行「生产域 + 某个固定 preview 域」时用得上。
          */
         CLIENT_ORIGIN: 'http://localhost:5173',
+
+        /*
+         * ── 滥用兜底三件套(可选,不写就用代码里的默认值)──
+         *
+         * 定位是**随机扫描器保险,不是抗定向攻击**。真被定向打了,
+         * 答案是 Cloudflare 免费档前置 + 封 IP,不在应用层解。
+         *
+         * 默认值对朋友局绰绰有余,一般不用动。要调就在这里加,
+         * 改完记得 pm2 delete + start(不是 restart —— pm2 缓存 env)。
+         *
+         *   MAX_CONNECTIONS_PER_IP: '20',   // 同一 IP 并发连接上限
+         *   EVENT_RATE_PER_SEC:     '10',   // 普通事件速率
+         *   JUDGE_RATE_PER_SEC:     '30',   // 判定类放宽(oracle 清队列会连点)
+         *   EVENT_BURST:            '20',   // 桶容量(允许的突发)
+         *   MAX_PAYLOAD_BYTES:      '65536',// socket.io 单帧上限(默认 1MB → 64KB)
+         */
       },
     },
   ],
