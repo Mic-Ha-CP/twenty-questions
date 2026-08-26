@@ -375,13 +375,19 @@ export class Room {
   /**
    * 上位。**先到先得**:座位有人就拒,不排队、不抢占。
    * 同步执行 = 两个并发申领之间没有交错窗口,后到者必然收 SEAT_TAKEN。
-   * 「在座 guesser 可直接切换上位」= 一步动作 —— guesser 本来就没有要先腾的座位。
+   *
+   * **填空 ≠ 转移(SPEC §2)。** 座位空着时**任意 phase 都放行** ——
+   * 这是房间的自救路径:oracle 中途退出会把座位清空,如果只有 lobby 能上位,
+   * 那一局就永久卡死了(2 人房里连 host 指派都被 ≥3 gate 挡住)。
+   * 座位空着时没有人拿着汤底,填坑不产生任何泄题问题。
+   *
+   * client 在中段填空前会弹确认(「你将立即看到汤底/答案词并接手判定」)——
+   * 那是 UI 的责任,server 只管放行。
    */
   claimOracle(requesterId: PlayerId, now: number): Result<void> {
     if (!this.has(requesterId)) return err('NOT_IN_ROOM');
-    if (this.phase !== 'lobby') return err('NOT_LOBBY_PHASE');
     if (this.oracleId === requesterId) return OK; // 幂等,不算错
-    if (this.oracleId !== null) return err('SEAT_TAKEN');
+    if (this.oracleId !== null) return err('SEAT_TAKEN'); // 有人就是有人,任何 phase 都抢不了
     this.oracleId = requesterId;
     this.touch(now);
     return OK;
@@ -413,8 +419,19 @@ export class Room {
    */
   assignOracle(requesterId: PlayerId, targetId: PlayerId | null, now: number): Result<void> {
     if (!this.isHost(requesterId)) return err('NOT_HOST');
-    // 中段的人数 gate —— UI 藏按钮不算数,server 也得挡(见 canTransferOracle)。
-    if (this.phase !== 'lobby' && !this.canTransferOracle()) return err('TOO_FEW_FOR_TRANSFER');
+    /*
+     * **填空 ≠ 转移。** 人数 gate 只管**转移**(座位上有人):
+     * 它的理由是「换完之后场上唯一的猜题人就是刚放下汤底的那个」——
+     * 这个理由**只在座位有人时成立**。
+     *
+     * 座位空着时是**填空**,没有人拿着汤底,不产生泄题问题;
+     * 而且填空是房间的自救路径 —— 拿 gate 拦住它,换来的是永久卡死的房间。
+     * (session 6 smoke 实测:2 人房里 oracle 退出重进就再也救不回来。)
+     */
+    const isTransfer = this.oracleId !== null;
+    if (isTransfer && this.phase !== 'lobby' && !this.canTransferOracle()) {
+      return err('TOO_FEW_FOR_TRANSFER');
+    }
     if (targetId !== null && !this.has(targetId)) return err('PLAYER_NOT_FOUND');
     this.oracleId = targetId;
     this.touch(now);
@@ -422,11 +439,14 @@ export class Room {
   }
 
   /**
-   * 中段还能不能转移出题人。**UI 藏按钮和 server 判定读同一条规则** ——
-   * 两边各写一份迟早会漂。
+   * 中段还能不能**转移**出题人(座位上有人的那种)。
+   * **UI 藏按钮和 server 判定读同一条规则** —— 两边各写一份迟早会漂。
    *
    * lobby 阶段永远可以(还没人知道任何东西);中段要求房内 ≥3 人,
    * 否则换完之后场上唯一的猜题人就是刚放下汤底的前任。
+   *
+   * ⚠️ **这条不管「填空」。** 座位空着时任何人数都能上位 —— 见 `claimOracle`。
+   * client 判断该显示哪个入口:`oracleId === null` → 填空,否则 → 转移。
    */
   canTransferOracle(): boolean {
     if (this.phase === 'lobby') return true;

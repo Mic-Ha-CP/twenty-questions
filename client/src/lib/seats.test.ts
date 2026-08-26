@@ -7,7 +7,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { seatBadge, seatColor, shouldShowTransferControl, shouldShowTruthPanel } from './seats';
+import {
+  seatBadge,
+  seatColor,
+  shouldShowFillSeat,
+  shouldShowTransferControl,
+  shouldShowTruthPanel,
+} from './seats';
 
 describe('座位色:确定性与唯一性', () => {
   it('同一个号永远同一个色 —— 每个 client 算出来都一样', () => {
@@ -99,21 +105,61 @@ describe('真相面板:只在 oracle 那一侧渲染', () => {
 });
 
 describe('转移出题人入口的显隐(smoke 第三轮修正 3)', () => {
+  /** 座位有人 = 转移。 */
+  const taken = (o: { isHost: boolean; canTransferOracle: boolean }) => ({
+    ...o,
+    seatVacant: false,
+  });
+
   it('host + 人够 → 出现', () => {
-    expect(shouldShowTransferControl({ isHost: true, canTransferOracle: true })).toBe(true);
+    expect(shouldShowTransferControl(taken({ isHost: true, canTransferOracle: true }))).toBe(true);
   });
 
   it('**2 人房中段整块隐藏** —— 只剩「公开汤底 · 结束本局」', () => {
-    expect(shouldShowTransferControl({ isHost: true, canTransferOracle: false })).toBe(false);
+    expect(shouldShowTransferControl(taken({ isHost: true, canTransferOracle: false }))).toBe(false);
   });
 
   it('非 host 永远看不到', () => {
-    expect(shouldShowTransferControl({ isHost: false, canTransferOracle: true })).toBe(false);
-    expect(shouldShowTransferControl({ isHost: false, canTransferOracle: false })).toBe(false);
+    expect(shouldShowTransferControl(taken({ isHost: false, canTransferOracle: true }))).toBe(false);
+    expect(shouldShowTransferControl(taken({ isHost: false, canTransferOracle: false }))).toBe(
+      false,
+    );
   });
 
   it('**规则来自 server 投影,不是 client 数人头** —— 这里没有 players.length', () => {
     // 这条断言的意义是提醒:要加人数逻辑就去 Room.canTransferOracle 改,别在这儿加。
     expect(shouldShowTransferControl.length).toBe(1);
+  });
+});
+
+describe('填空 ≠ 转移:座位空着时的入口(session 6 smoke)', () => {
+  /**
+   * 卡死的那一局长这样:2 人房,oracle 退出又重进,座位空着。
+   * 如果这里跟着 `canTransferOracle` 一起隐藏,host 侧就**一条路都没有了**。
+   */
+  it('**host + 座位空 + 人不够 → 仍然出现**(这就是解卡死的那条路)', () => {
+    expect(
+      shouldShowTransferControl({ isHost: true, canTransferOracle: false, seatVacant: true }),
+    ).toBe(true);
+  });
+
+  it('座位空但不是 host → 不出现(host 侧入口只给 host)', () => {
+    expect(
+      shouldShowTransferControl({ isHost: false, canTransferOracle: false, seatVacant: true }),
+    ).toBe(false);
+  });
+
+  it('**「我来接手」横幅对所有人开放** —— 不只是 host,谁先反应过来谁接', () => {
+    expect(shouldShowFillSeat({ oracleId: null, phase: 'playing' })).toBe(true);
+    expect(shouldShowFillSeat({ oracleId: null, phase: 'setup' })).toBe(true);
+    expect(shouldShowFillSeat({ oracleId: null, phase: 'reveal' })).toBe(true);
+  });
+
+  it('座位有人时不显示 —— 抢不到,显示了只会诱导误点', () => {
+    expect(shouldShowFillSeat({ oracleId: 'someone', phase: 'playing' })).toBe(false);
+  });
+
+  it('lobby 不显示 —— 那儿有现成的座位面板', () => {
+    expect(shouldShowFillSeat({ oracleId: null, phase: 'lobby' })).toBe(false);
   });
 });

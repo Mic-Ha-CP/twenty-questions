@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { Button, Modal, Panel } from '@/components/ui';
 import { PlayerTagById } from '@/components/player';
-import { shouldShowTransferControl } from '@/lib/seats';
+import { shouldShowFillSeat, shouldShowTransferControl } from '@/lib/seats';
 import { fill } from '@/lib/strings';
 import { useIsHost, useIsOracle, useRoomStore } from '@/store/roomStore';
 import { useLangStore, useT } from '@/store/langStore';
@@ -122,6 +122,61 @@ export function HostTransferNotice() {
   );
 }
 
+/* ═══════════════════════ 填空:出题人座位空了 ═══════════════════════ */
+
+/**
+ * **出题人座位空了** —— 局中段的自救入口,**全房可见,人人可点**。
+ *
+ * 怎么会空:oracle 退出房间、又从大厅重新加入(session 6 线上 smoke 撞出来的)。
+ * 房里有人,座位没人,谁都不知道该等谁 —— 所以这条横幅要显眼,而且
+ * **不等 host 发话**:谁先反应过来谁接,比等房主快。
+ *
+ * 「填空 ≠ 转移」(SPEC §2):这条路**不受 ≥3 人的转移 gate 约束**,
+ * 因为没人正拿着汤底,填坑不会造出「唯一的猜题人刚放下汤底」那个局面。
+ *
+ * 但要接手就会**立刻看到汤底**,这是不可撤销的,所以点下去先确认。
+ */
+export function OracleSeatVacantBanner() {
+  const t = useT();
+  const room = useRoomStore((s) => s.room)!;
+  const { claimOracle } = useRoomStore();
+  const [confirming, setConfirming] = useState(false);
+
+  if (!shouldShowFillSeat(room)) return null;
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2 rounded border border-judge-unclear/45 bg-panel px-3 py-1.5 text-xs text-ink">
+        <span>{t('ui', 'seat.vacantMidGame')}</span>
+        <Button className="ml-auto px-2.5 py-1 text-xs" onClick={() => setConfirming(true)}>
+          {t('ui', 'seat.fill')}
+        </Button>
+      </div>
+
+      {confirming && (
+        <Modal>
+          <Panel className="w-full max-w-md p-5">
+            {/* 说清后果:点下去就看见汤底了,退不回来 */}
+            <p className="text-sm leading-relaxed text-ink">{t('ui', 'seat.fillConfirm')}</p>
+            <div className="mt-4 flex justify-end gap-3">
+              <Button onClick={() => setConfirming(false)}>{t('ui', 'play.cancel')}</Button>
+              <Button
+                variant="solid"
+                onClick={() => {
+                  claimOracle();
+                  setConfirming(false);
+                }}
+              >
+                {t('ui', 'seat.fillYes')}
+              </Button>
+            </div>
+          </Panel>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 /* ═══════════════════════ 转移出题人 ═══════════════════════ */
 
 /**
@@ -138,14 +193,25 @@ export function TransferOracleControl() {
   const [picking, setPicking] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
 
-  // 2 人房中段:入口整个不出现,只剩「公开汤底 · 结束本局」那条路
-  if (!shouldShowTransferControl({ isHost, canTransferOracle: room.canTransferOracle })) {
+  const seatVacant = room.oracleId === null;
+
+  // 2 人房中段**转移**:入口整个不出现,只剩「公开汤底 · 结束本局」那条路。
+  // 但**填空**(座位空着)永远放行 —— 那是房间卡死时唯一的 host 侧出路。
+  if (
+    !shouldShowTransferControl({ isHost, canTransferOracle: room.canTransferOracle, seatVacant })
+  ) {
     return null;
   }
 
-  const candidates = room.players.filter((p) => p.id !== room.oracleId);
+  // 填空时把自己排除掉:host 想自己上,走横幅那条(那条带「会看到汤底」的确认)
+  const candidates = room.players.filter(
+    (p) => p.id !== room.oracleId && !(seatVacant && p.id === room.viewerId),
+  );
 
-  // 第二段:说清后果再确认
+  const label = seatVacant ? t('ui', 'oracle.assignTo') : t('ui', 'oracle.transferTo');
+
+  // 第二段:说清后果再确认。**只有转移才走这段** —— 填空没有「谁被拿走了什么」,
+  // 而且房间正卡着,多一次点击都是多余的摩擦。
   if (target) {
     const name = room.players.find((p) => p.id === target)?.nickname ?? '—';
     return (
@@ -177,16 +243,28 @@ export function TransferOracleControl() {
   if (!picking) {
     return (
       <Button className="px-2.5 py-1 text-xs" onClick={() => setPicking(true)}>
-        {t('ui', 'oracle.transferTo')}
+        {label}
       </Button>
     );
   }
   return (
     <Panel className="w-full p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted">{t('ui', 'oracle.transferTo')}</span>
+        <span className="text-xs text-muted">{label}</span>
         {candidates.map((p) => (
-          <Button key={p.id} className="px-2.5 py-1 text-xs" onClick={() => setTarget(p.id)}>
+          <Button
+            key={p.id}
+            className="px-2.5 py-1 text-xs"
+            onClick={() => {
+              // 填空:直接落座,不走确认;转移:进第二段
+              if (seatVacant) {
+                assignOracle(p.id);
+                setPicking(false);
+              } else {
+                setTarget(p.id);
+              }
+            }}
+          >
             <PlayerTagById id={p.id} />
           </Button>
         ))}

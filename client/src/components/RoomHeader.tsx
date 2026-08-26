@@ -11,6 +11,7 @@
 import { PlayerStrip } from '@/components/player';
 import {
   HostOfflineBanner,
+  OracleSeatVacantBanner,
   HostTransferNotice,
   LangToggle,
   LeaveRoomButton,
@@ -43,6 +44,7 @@ export function RoomHeader({ compact = false }: { compact?: boolean }) {
       )}
       <div className="mt-2 flex flex-col gap-1.5 empty:mt-0">
         <HostOfflineBanner />
+        <OracleSeatVacantBanner />
         <HostTransferNotice />
       </div>
     </header>

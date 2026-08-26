@@ -78,11 +78,38 @@ export function shouldShowTruthPanel(room: TruthPanelSource): boolean {
 export interface TransferControlSource {
   isHost: boolean;
   canTransferOracle: boolean;
+  /** 座位空着 = **填空**,不受 ≥3 gate 管(SPEC §2)。 */
+  seatVacant: boolean;
 }
 
+/**
+ * host 的座位入口要不要出现。
+ *
+ * **填空 ≠ 转移**:座位空着时永远显示(填空是房间的自救路径);
+ * 座位有人时才看 `canTransferOracle`(≥3 gate)。
+ */
 export function shouldShowTransferControl({
   isHost,
   canTransferOracle,
+  seatVacant,
 }: TransferControlSource): boolean {
-  return isHost && canTransferOracle;
+  if (!isHost) return false;
+  return seatVacant || canTransferOracle;
+}
+
+/**
+ * 「出题人位子空着」横幅要不要出现 —— **对所有人开放**,不只是 host:
+ * 中段没了出题人,谁先反应过来谁接,比等房主发话快。
+ *
+ * lobby 不显示 —— 那儿有现成的座位面板,横幅只会重复喊一遍。
+ * 座位有人时一律不显示(抢不了,显示了只会诱导误点)。
+ */
+export function shouldShowFillSeat({
+  oracleId,
+  phase,
+}: {
+  oracleId: string | null;
+  phase: string;
+}): boolean {
+  return oracleId === null && phase !== 'lobby';
 }
